@@ -1,0 +1,61 @@
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=1
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=0
+wavecode_0_scaling=1.00000
+wavecode_0_smoothing=0.50000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_per_frame1=advance=advance+ 0.003;
+wave_0_per_frame2=advance=if( above(advance,2) , 0, advance);
+wave_0_per_frame3=t1=advance
+wave_0_per_point1=s = sample * 6.28;
+wave_0_per_point2=
+wave_0_per_point3=// Random x position (modified for more variation)
+wave_0_per_point4=xp = sin(s) + sin(s*0.34) + sin(s*24.3) + sin(s*13.8) + sin(s*7.2);
+wave_0_per_point5=xp = xp * 0.25;
+wave_0_per_point6=
+wave_0_per_point7=// Random y position (modified for more variation)
+wave_0_per_point8=yp = cos(s) + sin(s*0.24) + cos(s*17.4) + sin(s*37.7) + cos(s*9.1);
+wave_0_per_point9=yp = yp * 0.25;
+wave_0_per_point10=
+wave_0_per_point11=// Random z position (modified for depth variation)
+wave_0_per_point12=zp = cos(s) + cos(s*5.24) + cos(s*47.4) + cos(s*27.7) + sin(s*12.3);
+wave_0_per_point13=zp = zp * 0.3;
+wave_0_per_point14=
+wave_0_per_point15=// Pull stars toward screen
+wave_0_per_point16=zp = zp + 1 - t1;
+wave_0_per_point17=
+wave_0_per_point18=// Correct when below 0
+wave_0_per_point19=zp = if(below(zp, 0), zp + 2, zp);
+wave_0_per_point20=
+wave_0_per_point21=// Star size & brightness adjustment (bigger stars)
+wave_0_per_point22=star_size = 0.8 + 0.4 * sin(s*5.0); // Varying star size
+wave_0_per_point23=a = (1 - zp*3) * (0.8 + 0.4 * sin(s*3.0)); // Brighter stars
+wave_0_per_point24=
+wave_0_per_point25=zp = zp * 0.9;
+wave_0_per_point26=
+wave_0_per_point27=x_screen = -xp/zp + 0.5;
+wave_0_per_point28=y_screen = -yp/zp + 0.5;
+wave_0_per_point29=
+wave_0_per_point30=// Random colors based on sample position
+wave_0_per_point31=r = 0.7 + 0.3 * sin(s * 1.5 + 1.0);
+wave_0_per_point32=g = 0.7 + 0.3 * sin(s * 2.0 + 2.0);
+wave_0_per_point33=b = 0.7 + 0.3 * sin(s * 2.5 + 3.0);
+wave_0_per_point34=
+wave_0_per_point35=// Apply star size effect (makes stars appear bigger)
+wave_0_per_point36=dist = sqrt((x - x_screen)*(x - x_screen) + (y - y_screen)*(y - y_screen));
+wave_0_per_point37=brightness = 1.0;
+wave_0_per_point38=
+wave_0_per_point39=// Final color with brightness
+wave_0_per_point40=r = r * brightness;
+wave_0_per_point41=g = g * brightness;
+wave_0_per_point42=b = b * brightness;
+wave_0_per_point43=
+wave_0_per_point44=x = x_screen;
+wave_0_per_point45=y = y_screen;

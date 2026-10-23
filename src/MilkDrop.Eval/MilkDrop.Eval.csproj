@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>MilkDrop.Eval</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- ProjectMEvalSharp（projectm-eval 的托管移植）源码已并入本库，不再引用外部工程 -->
+    <InternalsVisibleTo Include="MilkDrop.Eval.Tests" />
+  </ItemGroup>
+</Project>

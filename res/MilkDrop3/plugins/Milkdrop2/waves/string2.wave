@@ -1,0 +1,66 @@
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=0
+wavecode_0_scaling=1.00000
+wavecode_0_smoothing=0.50000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_per_frame1=t1=sin(time*0.22)*0.5+0.5;
+wave_0_per_frame2=t2=sin(time*0.17)*0.5+0.5
+wave_0_per_frame3=
+wave_0_per_point1=n=sample*6.283;
+wave_0_per_point2=
+wave_0_per_point3=xp= sin(n) * (sin(n*2)*0.5+0.5);
+wave_0_per_point4=yp= cos(n) * (cos(n*(t1*3+1))*0.5+0.5);
+wave_0_per_point5=zp= 0;
+wave_0_per_point6=
+wave_0_per_point7=ang=n*16*t2 + n;
+wave_0_per_point8=sang=sin(ang);cang=cos(ang);
+wave_0_per_point9=xq=xp;
+wave_0_per_point10=yq=yp*sang + zp*cang;
+wave_0_per_point11=zq=yp*cang - zp*sang;
+wave_0_per_point12=xp=xq;yp=yq;zp=zq;
+wave_0_per_point13=
+wave_0_per_point14=
+wave_0_per_point15=ang=time*0.2;
+wave_0_per_point16=sang=sin(ang);cang=cos(ang);
+wave_0_per_point17=xq=xp;
+wave_0_per_point18=yq=yp*sang + zp*cang;
+wave_0_per_point19=zq=yp*cang - zp*sang;
+wave_0_per_point20=xp=xq;yp=yq;zp=zq;
+wave_0_per_point21=
+wave_0_per_point22=ang=time*0.11;
+wave_0_per_point23=sang=sin(ang);cang=cos(ang);
+wave_0_per_point24=xq=xp*sang + zp*cang;
+wave_0_per_point25=yq=yp;
+wave_0_per_point26=zq=xp*cang - zp*sang;
+wave_0_per_point27=xp=xq;yp=yq;zp=zq;
+wave_0_per_point28=
+wave_0_per_point29=
+wave_0_per_point30=zp=zp+4.1;
+wave_0_per_point31=x=-xp/zp + 0.5;
+wave_0_per_point32=y=yp/zp*1.333 + 0.5;
+wave_0_per_point33=
+wave_0_per_point34=s=sample*2 + time;
+wave_0_per_point35=rr= s - int(s);
+wave_0_per_point36=rr=rr*2;
+wave_0_per_point37=rr= if(above(rr,1), 1-rr , rr);
+wave_0_per_point38=r=rr;
+wave_0_per_point39=
+wave_0_per_point40=s=sample*2.3 + time;
+wave_0_per_point41=gg= s - int(s);
+wave_0_per_point42=gg=gg*2;
+wave_0_per_point43=gg= if(above(gg,1), 1-gg , gg);
+wave_0_per_point44=g=gg;
+wave_0_per_point45=
+wave_0_per_point46=s=sample*2.6 + time;
+wave_0_per_point47=bb= s - int(s);
+wave_0_per_point48=bb=bb*2;
+wave_0_per_point49=bb= if(above(bb,1), 1-bb , bb);
+wave_0_per_point50=b=bb

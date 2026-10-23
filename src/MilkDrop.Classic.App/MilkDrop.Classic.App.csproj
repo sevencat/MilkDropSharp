@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>MilkDrop.Classic.App</RootNamespace>
+    <AssemblyName>MilkDrop.Classic</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MilkDrop.Eval\MilkDrop.Eval.csproj" />
+    <ProjectReference Include="..\MilkDrop.Classic.Render.D3D9\MilkDrop.Classic.Render.D3D9.csproj" />
+    <ProjectReference Include="..\MilkDrop.Classic.Visualizer\MilkDrop.Classic.Visualizer.csproj" />
+  </ItemGroup>
+</Project>

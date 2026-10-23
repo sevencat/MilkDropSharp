@@ -1,0 +1,47 @@
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=0
+wavecode_0_bAdditive=0
+wavecode_0_scaling=1.00000
+wavecode_0_smoothing=0.50000
+wavecode_0_r=1.000
+wavecode_0_g=0.400
+wavecode_0_b=0.000
+wavecode_0_a=1.000
+wave_0_per_frame1=t1 = time + sin(time*2);
+wave_0_per_point1=n = sample*6.283;
+wave_0_per_point2=
+wave_0_per_point3=xp = 1;
+wave_0_per_point4=yp = 0;
+wave_0_per_point5=zp = 0;
+wave_0_per_point6=
+wave_0_per_point7=phs = sample;
+wave_0_per_point8=
+wave_0_per_point9=ang = t1 + phs;
+wave_0_per_point10=sang = sin(ang) ; cang = cos(cang);
+wave_0_per_point11=xq = xp*sang + yp*cang;
+wave_0_per_point12=yq = xp*cang - yp*sang;
+wave_0_per_point13=zq = zp;
+wave_0_per_point14=xp = xq; yp = yq; zp = zq;
+wave_0_per_point15=
+wave_0_per_point16=ang = (t1+phs)*2.3;
+wave_0_per_point17=sang = sin(ang) ; cang = cos(cang);
+wave_0_per_point18=xq = xp*sang + zp*cang;
+wave_0_per_point19=yq = yp;
+wave_0_per_point20=zq = xp*cang - zp*sang;
+wave_0_per_point21=xp = xq; yp = yq; zp = zq;
+wave_0_per_point22=
+wave_0_per_point23=
+wave_0_per_point24=ang = (t1+phs)*3.3;
+wave_0_per_point25=sang = sin(ang) ; cang = cos(cang);
+wave_0_per_point26=xq = xp;
+wave_0_per_point27=yq = yp*sang + zp*cang;
+wave_0_per_point28=zq = yp*cang - zp*sang;
+wave_0_per_point29=xp = xq; yp = yq; zp = zq;
+wave_0_per_point30=
+wave_0_per_point31=zp = zp*2 + 3;
+wave_0_per_point32=x = xp/zp + 0.5;
+wave_0_per_point33=y = yp/zp * 1.3333 + 0.5;

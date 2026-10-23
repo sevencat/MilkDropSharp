@@ -1,0 +1,165 @@
+MD31=9203215074366339845
+MD32=8224556265786651322
+MILKDROP_PRESET_VERSION=201
+PSVERSION=4
+PSVERSION_WARP=4
+PSVERSION_COMP=2
+[preset00]
+FFTAttack=0.500
+FFTDecay=0.500
+fRating=5.000
+fGammaAdj=1.460
+fDecay=0.935
+fVideoEchoZoom=1.007
+fVideoEchoAlpha=0.500
+nVideoEchoOrientation=2
+nWaveMode=2
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=1
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=1
+bTexWrap=0
+bDarkenCenter=0
+bRedBlueStereo=0
+bBrighten=1
+bDarken=1
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.000
+fWaveScale=0.591
+fWaveSmoothing=0.500
+fWaveParam=0.000
+fModWaveAlphaStart=0.500
+fModWaveAlphaEnd=1.000
+fWarpAnimSpeed=1.817
+fWarpScale=0.918
+fZoomExponent=0.33077
+fShader=1.000
+zoom=1.00000
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=0.55697
+sx=1.00000
+sy=1.00000
+wave_r=0.500
+wave_g=0.500
+wave_b=0.500
+wave_x=0.500
+wave_y=0.500
+ob_size=0.000
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=1.000
+ib_size=0.000
+ib_r=0.000
+ib_g=0.000
+ib_b=0.000
+ib_a=1.000
+nMotionVectorsX=1.000
+nMotionVectorsY=48.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_1=vvb = max(0,min(1,vvb));
+per_frame_2=vvm = max(0,min(1,vvm));
+per_frame_3=vvt = max(0,min(1,vvt));
+per_frame_4=vb = vb*0.85 + (1-vb)*pow(bass,2)*0.01;
+per_frame_5=vvb = vvb*0.95 + (1-vvb)*vb*0.2;
+per_frame_6=vm = vm*0.85 + (1-vm)*pow(mid,2)*0.01;
+per_frame_7=vvm = vvm*0.95 + (1-vvm)*vm*0.2;
+per_frame_8=vt = vt*0.85 + (1-vt)*pow(treb,2)*0.01;
+per_frame_9=vvt = vvt*0.95 + (1-vvt)*vt*0.2;
+per_frame_10=v=0.03*(60/fps);
+per_frame_11=d = 0;//v*0.35;
+per_frame_12=bb = bb + vvb*v - d;
+per_frame_13=mm = mm + vvm*v - d;
+per_frame_14=tt = tt + vvt*v - d;
+per_frame_15=zz = -0.5;
+per_frame_16=yy = 0;
+per_frame_17=xx = 0.5*sqrt(3);
+per_frame_18=zom = .5;
+per_frame_19=s1 = sin(tt);
+per_frame_20=s2 = sin(mm);
+per_frame_21=s3 = sin(bb);
+per_frame_22=c1 = cos(tt);
+per_frame_23=c2 = cos(mm);
+per_frame_24=c3 = cos(bb);
+per_frame_25=x1 = (c1*c2*xx + c1*s2*yy - s1*zz);
+per_frame_26=y1 = ((s3*s1*c2 - c3*s2)*xx + (s3*s1*s2+c3*c2)*yy + s3*c1*zz);
+per_frame_27=q11 = 0.5 + (x1)*zom;;
+per_frame_28=q12 = 0.5 + (y1)*zom;
+per_frame_29=zz = -0.5;
+per_frame_30=pi = asin(1)*4;
+per_frame_31=yy = 0.5*sqrt(3)*sin(pi/3);
+per_frame_32=xx = 0.5*sqrt(3)*cos(pi/3);
+per_frame_33=x1 = (c1*c2*xx + c1*s2*yy - s1*zz);
+per_frame_34=y1 = ((s3*s1*c2 - c3*s2)*xx + (s3*s1*s2+c3*c2)*yy + s3*c1*zz);
+per_frame_35=q13 = 0.5 + (x1)*zom;;
+per_frame_36=q14 = 0.5 + (y1)*zom;
+per_frame_37=zz = 1;
+per_frame_38=yy = 0;
+per_frame_39=xx = 0;
+per_frame_40=x1 = (c1*c2*xx + c1*s2*yy - s1*zz);
+per_frame_41=y1 = ((s3*s1*c2 - c3*s2)*xx + (s3*s1*s2+c3*c2)*yy + s3*c1*zz);
+per_frame_42=q15 = 0.5 + (x1)*zom;;
+per_frame_43=q16 = 0.5 + (y1)*zom;
+per_frame_44=zz = -0.5;
+per_frame_45=pi = -asin(1)*4;
+per_frame_46=yy = 0.5*sqrt(3)*sin(pi/3);
+per_frame_47=xx = 0.5*sqrt(3)*cos(pi/3);
+per_frame_48=x1 = (c1*c2*xx + c1*s2*yy - s1*zz);
+per_frame_49=y1 = ((s3*s1*c2 - c3*s2)*xx + (s3*s1*s2+c3*c2)*yy + s3*c1*zz);
+per_frame_50=q17 = 0.5 + (x1)*zom;;
+per_frame_51=q18 = 0.5 + (y1)*zom;
+per_frame_52=q1 = (tt-bb)*8;
+per_frame_53=zoom = 1;
+per_frame_54=warp = 0;
+per_frame_55=bbb = bbb*0.94 + (bass-treb)*0.4;
+per_frame_56=monitor = bbb;
+per_frame_57=q2 = bbb*0.01;
+per_frame_58=w = -0.555;
+per_frame_59=q3 = sin(w);
+per_frame_60=q4 = cos(w);
+per_frame_61=w = bb-tt;
+per_frame_62=q5 = sin(w);
+per_frame_63=q6 = cos(w);
+per_frame_64=q7 = (bb-mm);
+per_frame_65=q8 = (tt-mm);
+per_frame_66=monitor = q7;
+warp_1=`shader_body
+warp_2=`{
+warp_3=`// MilkDrop3: diatribes - MilkDrop2077 - Plasma of Strings
+warp_4=`// This shader works only with MD3 :)
+warp_5=`
+warp_6=`// Support diatribes's amazing work:
+warp_7=`// https://milkdrop3.com/diatribes/
+warp_8=`
+warp_9=`// sample previous frame
+warp_10=`ret = tex2D(sampler_main, uv).xyz;
+warp_11=`
+warp_12=`// darken (decay) over time
+warp_13=`ret *= 0.94; //or try: ret -= 0.004;
+warp_14=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`// MilkDrop3: diatribes - MilkDrop2077 - Plasma of Strings
+comp_4=`// This shader works only with MD3 :)
+comp_5=`
+comp_6=`ret = tex2D(sampler_main, uv).xyz;
+comp_7=`}

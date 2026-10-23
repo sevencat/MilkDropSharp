@@ -1,0 +1,42 @@
+wavecode_0_enabled=1
+wavecode_0_samples=512
+wavecode_0_sep=0
+wavecode_0_bSpectrum=0
+wavecode_0_bUseDots=0
+wavecode_0_bDrawThick=1
+wavecode_0_bAdditive=1
+wavecode_0_scaling=0.28000
+wavecode_0_smoothing=0.00000
+wavecode_0_r=1.000
+wavecode_0_g=1.000
+wavecode_0_b=1.000
+wavecode_0_a=1.000
+wave_0_per_point1=t1 = .5;
+wave_0_per_point2=t2 = .5;
+wave_0_per_point3=
+wave_0_per_point4=sp = sample*6.283;
+wave_0_per_point5=spp = sample + (cos(sp*6)*.2);
+wave_0_per_point6=tm = time*.5 + sp;
+wave_0_per_point7=
+wave_0_per_point8=
+wave_0_per_point9=ax = sin(tm)*spp;
+wave_0_per_point10=ay = cos(tm)*spp;
+wave_0_per_point11=az = sin(tm*3)*spp;
+wave_0_per_point12=
+wave_0_per_point13=bx = ax;
+wave_0_per_point14=by = ay*cos(t2) - az*sin(t2);
+wave_0_per_point15=bz = ay*sin(t2) + az*cos(t2);
+wave_0_per_point16=
+wave_0_per_point17=ax = bx*cos(t1) - bz*sin(t1);
+wave_0_per_point18=ay = by;
+wave_0_per_point19=az = bx*sin(t1) + bz*cos(t1);
+wave_0_per_point20=
+wave_0_per_point21=
+wave_0_per_point22=invz = .5*(1/(az+2));
+wave_0_per_point23=x = ax*invz + t1;
+wave_0_per_point24=y = ay*invz + t2;
+wave_0_per_point25=
+wave_0_per_point26=
+wave_0_per_point27=r = x;
+wave_0_per_point28=g = y;
+wave_0_per_point29=b = 1-((x+y)/2);

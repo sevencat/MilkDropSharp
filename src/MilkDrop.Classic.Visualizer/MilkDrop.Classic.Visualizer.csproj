@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>MilkDrop.Classic.Visualizer</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- sprite 贴图解码：替代 D3DXCreateTextureFromFileExW（cbplan §2.2） -->
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MilkDrop.Eval\MilkDrop.Eval.csproj" />
+    <ProjectReference Include="..\MilkDrop.Classic.Render.D3D9\MilkDrop.Classic.Render.D3D9.csproj" />
+  </ItemGroup>
+</Project>

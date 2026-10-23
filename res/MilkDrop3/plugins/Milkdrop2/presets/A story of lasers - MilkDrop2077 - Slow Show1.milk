@@ -1,0 +1,110 @@
+MD32=10462174746630682807
+MILKDROP_PRESET_VERSION=201
+PSVERSION=5
+PSVERSION_WARP=5
+PSVERSION_COMP=5
+[preset00]
+FFTAttack=0.500
+FFTDecay=0.500
+fRating=5.000
+fGammaAdj=1.900
+fDecay=0.970
+fVideoEchoZoom=1.000
+fVideoEchoAlpha=0.000
+nVideoEchoOrientation=0
+nWaveMode=0
+bAdditiveWaves=0
+bWaveDots=0
+bWaveThick=0
+bModWaveAlphaByVolume=0
+bMaximizeWaveColor=0
+bTexWrap=0
+bDarkenCenter=1
+bRedBlueStereo=0
+bBrighten=0
+bDarken=0
+bSolarize=0
+bInvert=0
+fWaveAlpha=0.000
+fWaveScale=1.000
+fWaveSmoothing=0.630
+fWaveParam=-1.000
+fModWaveAlphaStart=0.750
+fModWaveAlphaEnd=0.950
+fWarpAnimSpeed=1.000
+fWarpScale=1.331
+fZoomExponent=1.00000
+fShader=0.000
+zoom=1.00000
+rot=0.00000
+cx=0.500
+cy=0.500
+dx=0.00000
+dy=0.00000
+warp=1.00000
+sx=1.00000
+sy=1.00000
+wave_r=0.000
+wave_g=0.000
+wave_b=0.000
+wave_x=0.000
+wave_y=0.000
+ob_size=0.010
+ob_r=0.000
+ob_g=0.000
+ob_b=0.000
+ob_a=0.000
+ib_size=0.010
+ib_r=0.250
+ib_g=0.250
+ib_b=0.250
+ib_a=0.000
+nMotionVectorsX=0.000
+nMotionVectorsY=0.000
+mv_dx=0.000
+mv_dy=0.000
+mv_l=0.900
+mv_r=1.000
+mv_g=1.000
+mv_b=1.000
+mv_a=0.000
+b1n=0.000
+b2n=0.000
+b3n=0.000
+b1x=1.000
+b2x=1.000
+b3x=1.000
+b1ed=0.250
+per_frame_init_1=q1=0.0;
+per_frame_init_2=q2=40.0;
+per_frame_init_3=q5=0.0;
+per_frame_init_4=q6=0.0;
+per_frame_init_5=time_delay=0.0;
+per_frame_init_6=rand_laser = rand(100);
+per_frame_1=time_delay = if(time_delay >= .2 && (bass+mid+treb)*.4 > 1.8, 0, time_delay += 1/fps);
+per_frame_2=rand_laser = if(time_delay == 0, rand(100), rand_laser); // Random seed from 0 to 100
+per_frame_3=
+per_frame_4=// We MUST assign these to Q variables so the comp shader can communicate with them
+per_frame_5=q1 = rand_laser; // Tells the shader which pattern/color to use
+per_frame_6=q2 = time_delay; // Tells the shader when a beat triggers (0 = beat)
+per_frame_7=q3 = bass;       // Used for smooth, non-seizure brightness pulsing
+warp_1=`shader_body {
+warp_2=`
+warp_3=`// If you enjoy laser shaders, please consider upgrading to MilkDrop3PRO.
+warp_4=`// The PRO version comes with a huge collection of exclusive, unreleased laser shaders,
+warp_5=`// ready for use in commercial events!
+warp_6=`// Get the PRO version: https://milkdrop3.com/
+warp_7=`
+warp_8=`}
+comp_1=`shader_body
+comp_2=`{
+comp_3=`// MilkDrop3: A story of lasers - MilkDrop2077 - Slow Show1
+comp_4=`// This shader works only with MD3 :)
+comp_5=`
+comp_6=`// If you enjoy laser shaders, please consider upgrading to MilkDrop3PRO.
+comp_7=`// The PRO version comes with a huge collection of exclusive, unreleased laser shaders,
+comp_8=`// ready for use in commercial events!
+comp_9=`// Get the PRO version: https://milkdrop3.com/
+comp_10=`
+comp_11=`ret = tex2D(sampler_main, uv).xyz;
+comp_12=`}
