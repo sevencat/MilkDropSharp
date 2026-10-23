@@ -62,6 +62,12 @@ public sealed class AppOptions
 
     public bool NoAudio { get; private set; }
 
+    /// <summary>不采集真实音频，改用合成测试音（`--bench` 建议启用）。</summary>
+    public bool SyntheticAudio { get; private set; }
+
+    /// <summary>只跑指定的预设清单文件（每行一个路径，bench 复测用）。</summary>
+    public string? BenchList { get; private set; }
+
     /// <summary>无人值守截图路径（配合 <c>--smoke</c>；空 = 不截图）。</summary>
     public string? ScreenshotPath { get; private set; }
 
@@ -170,6 +176,13 @@ public sealed class AppOptions
                 case "--no-audio":
                     options.NoAudio = true;
                     break;
+                case "--synthetic-audio":
+                    options.SyntheticAudio = true;
+                    options.NoAudio = true;
+                    break;
+                case "--bench-list":
+                    options.BenchList = ReadString(args, ref i);
+                    break;
                 case "--shot":
                     options.ScreenshotPath = ReadString(args, ref i);
                     break;
@@ -240,6 +253,7 @@ public sealed class AppOptions
               --fps N               写进 RenderContext.Fps 的目标帧率
               --no-aspect           关闭宽高比校正
               --no-audio            不采集系统音频（用静音驱动）
+              --synthetic-audio     不采集系统音频，改用合成测试音（有节拍的 440Hz+低频）
               --beat-sens F         节拍灵敏度（0..2）
               --hard-cut            启用节拍硬切
               --hard-cut-sens F     硬切阈值（默认 2.0）
@@ -253,6 +267,7 @@ public sealed class AppOptions
               --bench-frames N      每个预设渲染帧数（默认 10）
               --bench-limit N       只跑前 N 个预设（0 = 全部）
               --bench-skip N        跳过前 N 个预设（配合 --bench-limit 分段跑）
+              --bench-list FILE     只跑清单里的预设（每行一个路径）
               --bench-report FILE   报告（CSV）路径
               --bench-shots DIR     每个预设存一张 PNG
 

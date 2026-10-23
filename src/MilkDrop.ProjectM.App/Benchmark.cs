@@ -33,7 +33,8 @@ internal static class Benchmark
         string? reportPath,
         string? screenshotDirectory,
         int width,
-        int height)
+        int height,
+        Action? pumpAudioBeforeFrame = null)
     {
         if (presets.Count == 0)
         {
@@ -68,6 +69,7 @@ internal static class Benchmark
             {
                 for (var frame = 0; frame < frames; frame++)
                 {
+                    pumpAudioBeforeFrame?.Invoke();
                     engine.RenderFrame();
                     rendered++;
 

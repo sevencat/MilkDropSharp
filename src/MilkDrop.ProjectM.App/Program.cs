@@ -32,6 +32,7 @@ internal static class Program
 
     private static ProjectMEngine? _engine;
     private static AudioCapture? _audio;
+    private static SyntheticAudio? _syntheticAudio;
     private static PresetLibrary _library = new();
     private static PresetPlaylist? _playlist;
 
@@ -232,16 +233,26 @@ internal static class Program
             _engine.PresetLocked = false;
         }
 
-        if (!options.NoAudio)
+        if (options.NoAudio)
+        {
+            if (options.SyntheticAudio)
+            {
+                _syntheticAudio = new SyntheticAudio(_engine.Pcm);
+                Console.WriteLine("音频: 使用合成测试音（无人值守验证）");
+            }
+        }
+        else
         {
             _audio = new AudioCapture(_engine.Pcm);
         }
 
         if (options.Bench)
         {
-            IReadOnlyList<string> presets = _library.All.Count > 0
-                ? _library.All
-                : DefaultPresets();
+            IReadOnlyList<string> presets = !string.IsNullOrEmpty(options.BenchList)
+                ? ReadPresetList(options.BenchList)
+                : _library.All.Count > 0
+                    ? _library.All
+                    : DefaultPresets();
 
             if (options.BenchSkip > 0)
             {
@@ -254,7 +265,8 @@ internal static class Program
             }
 
             _exitCode = Benchmark.Run(_context.Gl, _engine, presets, Math.Max(1, options.BenchFrames),
-                options.BenchReport, options.BenchShots, fbWidth, fbHeight);
+                options.BenchReport, options.BenchShots, fbWidth, fbHeight,
+                _syntheticAudio is null ? null : _syntheticAudio.Pump);
 
             window.Close();
             return;
@@ -361,6 +373,33 @@ internal static class Program
         Console.WriteLine($"预设清单: {_library.All.Count} 个{(options.Shuffle ? "（随机播放）" : string.Empty)}");
     }
 
+    /// <summary>读取预设清单文件（每行一个路径，<c>#</c> 开头为注释）。</summary>
+    private static IReadOnlyList<string> ReadPresetList(string listPath)
+    {
+        if (!File.Exists(listPath))
+        {
+            Console.Error.WriteLine("预设清单不存在: " + listPath);
+            return [];
+        }
+
+        var presets = new List<string>();
+
+        foreach (string rawLine in File.ReadLines(listPath))
+        {
+            string line = rawLine.Trim();
+
+            if (line.Length == 0 || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            presets.Add(line);
+        }
+
+        Console.WriteLine($"预设清单 {listPath}: {presets.Count} 个");
+        return presets;
+    }
+
     private static IReadOnlyList<string> DefaultPresets()
     {
         var library = new PresetLibrary();
@@ -397,6 +436,8 @@ internal static class Program
                 _fpsAccum = 0;
                 _fpsFrames = 0;
             }
+
+            _syntheticAudio?.Pump();
 
             if (_engine is not null)
             {
