@@ -13,7 +13,8 @@ namespace MilkDrop.ProjectM.Audio;
 /// </para>
 /// <para>
 /// C++ 用 <c>std::atomic&lt;size_t&gt;</c> 记录环形缓冲写指针（音频线程写、渲染线程读）。
-/// 这里暂用普通字段，宿主必须在同一个线程里喂数据（P6 接 WASAPI 时再加同步）。
+/// 这里用一把小锁保护环形缓冲与写指针，允许宿主在音频回调线程里 <see cref="Add(ReadOnlySpan{float}, int, int)"/>、
+/// 在渲染线程里 <see cref="UpdateFrameAudioData"/>。
 /// </para>
 /// </remarks>
 public sealed class Pcm
@@ -26,6 +27,9 @@ public sealed class Pcm
 
     /// <summary>环形缓冲写指针。</summary>
     private int _start;
+
+    /// <summary>保护环形缓冲与写指针（音频线程写、渲染线程读）。</summary>
+    private readonly object _sync = new();
 
     private readonly float[] _waveformL = new float[AudioConstants.AudioBufferSamples];
     private readonly float[] _waveformR = new float[AudioConstants.AudioBufferSamples];
@@ -80,8 +84,11 @@ public sealed class Pcm
     public void UpdateFrameAudioData(double secondsSinceLastFrame, uint frame)
     {
         // 1. 从环形输入缓冲取出最新窗口
-        CopyNewWaveformData(_inputBufferL, _waveformL);
-        CopyNewWaveformData(_inputBufferR, _waveformR);
+        lock (_sync)
+        {
+            CopyNewWaveformData(_inputBufferL, _waveformL);
+            CopyNewWaveformData(_inputBufferR, _waveformR);
+        }
 
         // 2. 左右声道各做一次频谱
         UpdateSpectrum(_waveformL, _spectrumL);
@@ -133,21 +140,27 @@ public sealed class Pcm
             return;
         }
 
-        for (var i = 0; i < sampleCount; i++)
+        lock (_sync)
         {
-            var bufferOffset = (_start + i) % AudioConstants.AudioBufferSamples;
-            _inputBufferL[bufferOffset] = 128f * (float.CreateTruncating(samples[i * channels]) - signalOffset) / signalAmplitude;
-            if (channels > 1)
+            var start = _start;
+            for (var i = 0; i < sampleCount; i++)
             {
-                _inputBufferR[bufferOffset] = 128f * (float.CreateTruncating(samples[1 + (i * channels)]) - signalOffset) / signalAmplitude;
+                var bufferOffset = (start + i) % AudioConstants.AudioBufferSamples;
+                _inputBufferL[bufferOffset] =
+                    128f * (float.CreateTruncating(samples[i * channels]) - signalOffset) / signalAmplitude;
+                if (channels > 1)
+                {
+                    _inputBufferR[bufferOffset] =
+                        128f * (float.CreateTruncating(samples[1 + (i * channels)]) - signalOffset) / signalAmplitude;
+                }
+                else
+                {
+                    _inputBufferR[bufferOffset] = _inputBufferL[bufferOffset];
+                }
             }
-            else
-            {
-                _inputBufferR[bufferOffset] = _inputBufferL[bufferOffset];
-            }
-        }
 
-        _start = (_start + sampleCount) % AudioConstants.AudioBufferSamples;
+            _start = (start + sampleCount) % AudioConstants.AudioBufferSamples;
+        }
     }
 
     /// <remarks>对应 <c>PCM.cpp:93-109</c>。</remarks>

@@ -117,4 +117,7 @@ internal static class VertexLayout
 
     /// <summary><c>offsetof(TexturedPoint, u)</c>。</summary>
     public const int TexturedPointUOffset = 6 * sizeof(float);
+
+    /// <summary><c>offsetof(ColoredPoint, r)</c>。</summary>
+    public const int ColoredPointRgbOffset = 2 * sizeof(float);
 }

@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text;
 using System.Text.RegularExpressions;
 using HlslParser;
@@ -17,14 +18,13 @@ namespace MilkDrop.ProjectM.MilkdropPreset;
 /// （预处理器 → 剔除自带的 sampler/texsize 声明 → 注入真实声明 → 解析 → 生成 GLSL）。
 /// </para>
 /// <para>
-/// 与 C++ 的差异：<c>PresetState</c>/<c>TextureManager</c>/<c>BlurTexture</c> 尚未移植（P4/P6/P7），
-/// 所以 <c>LoadTexturesAndCompile</c> 不再自己去纹理管理器取描述符，而是由调用方传入三组
-/// <see cref="TextureSamplerDescriptor"/>（主纹理 / 模糊纹理 / 其他纹理）；<c>LoadVariables</c>
-/// 等 <c>PresetState</c> 到位后补。着色器程序对象也由调用方持有（C++ 的 <c>m_shader</c> 在构造时
-/// 就会创建 GL program，本移植不这么早碰 GL，便于无上下文环境下单测文本流程）。
+/// 与 C++ 的差异：C++ 的 <c>m_shader</c> 在构造时就创建 GL program，本移植改成第一次用到
+/// （<see cref="ShaderProgram"/>）才创建，这样没有 GL 上下文时也能单测文本流程；
+/// 另外保留了一组"描述符由调用方传入"的 <c>LoadTexturesAndCompile</c> 重载，方便工具/测试
+/// 在没有完整 <see cref="PresetState"/> 时使用。
 /// </para>
 /// </remarks>
-public sealed class MilkdropShader
+public sealed class MilkdropShader : IDisposable
 {
     private const string WarpPsSignature =
         "\nvoid PS(float4 _vDiffuse : COLOR,\n" +
@@ -65,10 +65,54 @@ public sealed class MilkdropShader
 
     private readonly SortedSet<string> _samplerNames = new(StringComparer.Ordinal);
 
+    private readonly List<TextureSamplerDescriptor> _mainTextureDescriptors = [];
+    private readonly List<TextureSamplerDescriptor> _textureSamplerDescriptors = [];
+
+    private readonly float[] _randValues = new float[4];
+    private readonly Vector3[] _randTranslation = new Vector3[20];
+    private readonly Vector3[] _randRotationCenters = new Vector3[20];
+    private readonly Vector3[] _randRotationSpeeds = new Vector3[20];
+
+    /// <summary>GL program，第一次用到时才创建（无 GL 上下文时也能单测文本流程）。</summary>
+    private Shader? _shader;
+
     public MilkdropShader(ShaderType type)
     {
         Type = type;
+
+        // 对应 C++ 构造函数里的 m_randValues / m_randTranslation / m_randRotationCenters / m_randRotationSpeeds。
+        for (int i = 0; i < _randValues.Length; i++)
+        {
+            _randValues[i] = FloatRand();
+        }
+
+        int index = 0;
+        do
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                const float translationMult = 1f;
+                float rotMult = 0.9f * MathF.Pow(index / 8.0f, 3.2f);
+
+                _randTranslation[index] = new Vector3(
+                    (FloatRand() * 2 - 1) * translationMult,
+                    (FloatRand() * 2 - 1) * translationMult,
+                    (FloatRand() * 2 - 1) * translationMult);
+
+                _randRotationCenters[index] = new Vector3(FloatRand() * 6.28f, FloatRand() * 6.28f, FloatRand() * 6.28f);
+                _randRotationSpeeds[index] = new Vector3(
+                    (FloatRand() * 2 - 1) * rotMult,
+                    (FloatRand() * 2 - 1) * rotMult,
+                    (FloatRand() * 2 - 1) * rotMult);
+
+                index++;
+            }
+        }
+        while (index < _randTranslation.Length);
     }
+
+    /// <summary>本着色器的 GL program（对应 C++ 的 <c>Shader()</c>）。</summary>
+    public Shader ShaderProgram => _shader ??= new Shader();
 
     /// <summary>着色器类型。</summary>
     public ShaderType Type { get; }
@@ -210,6 +254,229 @@ public sealed class MilkdropShader
             : MilkdropStaticShaders.Get().GetPresetCompVertexShader();
 
         shader.CompileProgram(vertexShader, glsl);
+    }
+
+    /// <summary>
+    /// 从 <see cref="PresetState"/> 解析纹理、转译并编译（对应 <c>MilkdropShader::LoadTexturesAndCompile</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 需要 <see cref="PresetState"/> 已经设好 <c>RenderContext.TextureManager</c> 与主纹理；
+    /// 模糊级别会在编译成功后写回 <see cref="PresetState.BlurTexture"/>。
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">没有纹理管理器。</exception>
+    /// <exception cref="ShaderException">转译或编译失败。</exception>
+    public void LoadTexturesAndCompile(PresetState presetState)
+    {
+        ArgumentNullException.ThrowIfNull(presetState);
+
+        TextureManager textureManager = presetState.RenderContext.TextureManager
+            ?? throw new InvalidOperationException(
+                "PresetState.RenderContext.TextureManager 未设置，无法解析预设引用的纹理。");
+
+        _mainTextureDescriptors.Clear();
+        _textureSamplerDescriptors.Clear();
+
+        foreach (string name in _samplerNames)
+        {
+            string lowerCaseName = Utils.ToLower(GetSamplerBaseName(name));
+
+            // main 与 blur1..3 都是预设私有的，不归 TextureManager 管。
+            if (lowerCaseName == "main")
+            {
+                _mainTextureDescriptors.Add(
+                    new TextureSamplerDescriptor(presetState.MainTexture, textureManager.GetSampler(name), name, "main"));
+                continue;
+            }
+
+            // 少数预设直接写（未文档化的）采样器名。
+            if (lowerCaseName is "blur1" or "blur2" or "blur3")
+            {
+                UpdateMaxBlurLevel(lowerCaseName switch
+                {
+                    "blur1" => BlurLevel.Blur1,
+                    "blur2" => BlurLevel.Blur2,
+                    _ => BlurLevel.Blur3,
+                });
+                continue;
+            }
+
+            // 随机纹理：warp/composite 两个着色器要拿到同一张，所以按 slot 存在 PresetState 里。
+            if (IsRandomTextureName(lowerCaseName))
+            {
+                int randomSlot = int.Parse(lowerCaseName.AsSpan(4, 2));
+                if (randomSlot is >= 0 and <= 15)
+                {
+                    if (presetState.RandomTextureDescriptors.TryGetValue(randomSlot, out TextureSamplerDescriptor? existing))
+                    {
+                        _textureSamplerDescriptors.Add(existing);
+                        continue;
+                    }
+
+                    TextureSamplerDescriptor descriptor = textureManager.GetRandomTexture(name);
+                    presetState.RandomTextureDescriptors[randomSlot] = descriptor;
+                    _textureSamplerDescriptors.Add(descriptor);
+                    continue;
+                }
+            }
+
+            _textureSamplerDescriptors.Add(textureManager.GetTexture(name));
+        }
+
+        // 现在有纹理了，转译并编译。
+        List<TextureSamplerDescriptor> blurDescriptors =
+            presetState.BlurTexture.GetDescriptorsForBlurLevel(MaxBlurLevelRequired);
+        string glsl = TranspileHLSLShader(_mainTextureDescriptors, blurDescriptors, _textureSamplerDescriptors);
+
+        string vertexShader = Type == ShaderType.WarpShader
+            ? MilkdropStaticShaders.Get().GetPresetWarpVertexShader()
+            : MilkdropStaticShaders.Get().GetPresetCompVertexShader();
+
+        ShaderProgram.CompileProgram(vertexShader, glsl);
+
+        // 编译成功后才更新模糊级别。
+        presetState.BlurTexture.SetRequiredBlurLevel(MaxBlurLevelRequired);
+    }
+
+    /// <summary>
+    /// 把所有 uniform（时间/音频/颜色常量/随机矩阵/Q 变量）与纹理写进已编译的 program
+    /// （对应 <c>MilkdropShader::LoadVariables</c>）。
+    /// </summary>
+    public void LoadVariables(PresetState presetState, PerFrameContext perFrameContext)
+    {
+        ArgumentNullException.ThrowIfNull(presetState);
+        ArgumentNullException.ThrowIfNull(perFrameContext);
+
+        Shader shader = ShaderProgram;
+        RenderContext renderContext = presetState.RenderContext;
+
+        float floatTime = renderContext.Time;
+        float timeSincePresetStartWrapped = floatTime - (int)(floatTime / 10000.0) * 10000;
+        float mipX = MathF.Log(renderContext.ViewportSizeX) / MathF.Log(2.0f);
+        float mipY = MathF.Log(renderContext.ViewportSizeY) / MathF.Log(2.0f);
+        float mipAvg = 0.5f * (mipX + mipY);
+
+        Span<float> blurMin = stackalloc float[3];
+        Span<float> blurMax = stackalloc float[3];
+        BlurTexture.GetSafeBlurMinMaxValues(perFrameContext, blurMin, blurMax);
+
+        shader.Bind();
+
+        shader.SetUniformMat4x4("vertex_transformation", PresetState.OrthogonalProjection);
+
+        shader.SetUniformFloat4("rand_frame", new Vector4(FloatRand(), FloatRand(), FloatRand(), FloatRand()));
+        shader.SetUniformFloat4("rand_preset", new Vector4(_randValues[0], _randValues[1], _randValues[2], _randValues[3]));
+
+        shader.SetUniformFloat4("_c0", new Vector4(renderContext.AspectX, renderContext.AspectY,
+                                                  1.0f / renderContext.AspectX, 1.0f / renderContext.AspectY));
+        shader.SetUniformFloat4("_c1", Vector4.Zero);
+        shader.SetUniformFloat4("_c2", new Vector4(timeSincePresetStartWrapped, renderContext.Fps,
+                                                   renderContext.Frame, renderContext.Progress));
+        shader.SetUniformFloat4("_c3", new Vector4(presetState.AudioData.Bass, presetState.AudioData.Mid,
+                                                   presetState.AudioData.Treb, presetState.AudioData.Vol));
+        shader.SetUniformFloat4("_c4", new Vector4(presetState.AudioData.BassAtt, presetState.AudioData.MidAtt,
+                                                   presetState.AudioData.TrebAtt, presetState.AudioData.VolAtt));
+        shader.SetUniformFloat4("_c5", new Vector4(blurMax[0] - blurMin[0], blurMin[0],
+                                                   blurMax[1] - blurMin[1], blurMin[1]));
+        shader.SetUniformFloat4("_c6", new Vector4(blurMax[2] - blurMin[2], blurMin[2], blurMin[0], blurMax[0]));
+        shader.SetUniformFloat4("_c7", new Vector4(renderContext.ViewportSizeX, renderContext.ViewportSizeY,
+                                                  1.0f / renderContext.ViewportSizeX, 1.0f / renderContext.ViewportSizeY));
+
+        shader.SetUniformFloat4("_c8", new Vector4(
+            0.5f + 0.5f * MathF.Cos(floatTime * 0.329f + 1.2f),
+            0.5f + 0.5f * MathF.Cos(floatTime * 1.293f + 3.9f),
+            0.5f + 0.5f * MathF.Cos(floatTime * 5.070f + 2.5f),
+            0.5f + 0.5f * MathF.Cos(floatTime * 20.051f + 5.4f)));
+
+        shader.SetUniformFloat4("_c9", new Vector4(
+            0.5f + 0.5f * MathF.Sin(floatTime * 0.329f + 1.2f),
+            0.5f + 0.5f * MathF.Sin(floatTime * 1.293f + 3.9f),
+            0.5f + 0.5f * MathF.Sin(floatTime * 5.070f + 2.5f),
+            0.5f + 0.5f * MathF.Sin(floatTime * 20.051f + 5.4f)));
+
+        shader.SetUniformFloat4("_c10", new Vector4(
+            0.5f + 0.5f * MathF.Cos(floatTime * 0.0050f + 2.7f),
+            0.5f + 0.5f * MathF.Cos(floatTime * 0.0085f + 5.3f),
+            0.5f + 0.5f * MathF.Cos(floatTime * 0.0133f + 4.5f),
+            0.5f + 0.5f * MathF.Cos(floatTime * 0.0217f + 3.8f)));
+
+        shader.SetUniformFloat4("_c11", new Vector4(
+            0.5f + 0.5f * MathF.Sin(floatTime * 0.0050f + 2.7f),
+            0.5f + 0.5f * MathF.Sin(floatTime * 0.0085f + 5.3f),
+            0.5f + 0.5f * MathF.Sin(floatTime * 0.0133f + 4.5f),
+            0.5f + 0.5f * MathF.Sin(floatTime * 0.0217f + 3.8f)));
+
+        shader.SetUniformFloat4("_c12", new Vector4(mipX, mipY, mipAvg, 0));
+        shader.SetUniformFloat4("_c13", new Vector4(blurMin[1], blurMax[1], blurMin[2], blurMax[2]));
+
+        // 24 个随机变换矩阵：前 20 个每个预设固定（随时间旋转），后 4 个每帧全随机。
+        var tempMatrices = new float[24][];
+
+        for (int i = 0; i < 20; i++)
+        {
+            float rx = _randRotationCenters[i].X + _randRotationSpeeds[i].X * floatTime;
+            float ry = _randRotationCenters[i].Y + _randRotationSpeeds[i].Y * floatTime;
+            float rz = _randRotationCenters[i].Z + _randRotationSpeeds[i].Z * floatTime;
+
+            tempMatrices[i] = ComposeRandomMatrix(_randTranslation[i].X, _randTranslation[i].Y, _randTranslation[i].Z, rx, ry, rz);
+        }
+
+        for (int i = 20; i < 24; i++)
+        {
+            tempMatrices[i] = ComposeRandomMatrix(FloatRand(), FloatRand(), FloatRand(),
+                                                  FloatRand() * 6.28f, FloatRand() * 6.28f, FloatRand() * 6.28f);
+        }
+
+        ReadOnlySpan<string> matrixNames =
+        [
+            "rot_s1", "rot_s2", "rot_s3", "rot_s4",
+            "rot_d1", "rot_d2", "rot_d3", "rot_d4",
+            "rot_f1", "rot_f2", "rot_f3", "rot_f4",
+            "rot_vf1", "rot_vf2", "rot_vf3", "rot_vf4",
+            "rot_uf1", "rot_uf2", "rot_uf3", "rot_uf4",
+            "rot_rand1", "rot_rand2", "rot_rand3", "rot_rand4",
+        ];
+
+        for (int i = 0; i < matrixNames.Length; i++)
+        {
+            // GLSL mat3x4 = 前 3 列的 12 个 float。
+            shader.SetUniformMat3x4(matrixNames[i], tempMatrices[i].AsSpan(0, 12));
+        }
+
+        // _qa.x.._qa.w / _qb... 对应 q1..q32。
+        for (int i = 0; i < Constants.QVarCount; i += 4)
+        {
+            string variableName = "_q" + (char)('a' + i / 4);
+            shader.SetUniformFloat4(variableName, new Vector4(
+                (float)presetState.FrameQVariables[i],
+                (float)presetState.FrameQVariables[i + 1],
+                (float)presetState.FrameQVariables[i + 2],
+                (float)presetState.FrameQVariables[i + 3]));
+        }
+
+        // 绑定纹理与采样器（含主纹理与模糊纹理）。
+        int textureUnit = 0;
+
+        foreach (TextureSamplerDescriptor descriptor in _mainTextureDescriptors)
+        {
+            // 主纹理每帧互换，必须刷新引用。
+            descriptor.Texture = presetState.MainTexture;
+            descriptor.Bind(textureUnit, shader);
+            textureUnit++;
+        }
+
+        presetState.BlurTexture.Bind(ref textureUnit, shader);
+
+        foreach (TextureSamplerDescriptor descriptor in _textureSamplerDescriptors)
+        {
+            // 纹理被淘汰/管理器重建后按名字重新取一次（对应 C++ 的同名调用）。
+            if (descriptor.Empty() && !descriptor.UpdateFailed && renderContext.TextureManager is not null)
+            {
+                descriptor.TryUpdate(renderContext.TextureManager);
+            }
+
+            descriptor.Bind(textureUnit, shader);
+            textureUnit++;
+        }
     }
 
     /// <summary>
@@ -419,6 +686,111 @@ public sealed class MilkdropShader
     {
         ArgumentNullException.ThrowIfNull(samplerName);
         return samplerName.Length > 3 && samplerName[2] == '_' ? samplerName[3..] : samplerName;
+    }
+
+    /// <summary>释放惰性创建的 GL program（C++ 里由 <c>Shader</c> 的析构函数负责）。</summary>
+    public void Dispose()
+    {
+        if (_shader is not null && Rendering.GlContext.IsInitialized)
+        {
+            _shader.Dispose();
+        }
+
+        _shader = null;
+    }
+
+    /// <summary>C++ 的 <c>floatRand</c>：<c>rand() % 7381 / 7380</c>。</summary>
+    private static float FloatRand() => Random.Shared.Next() % 7381 / 7380.0f;
+
+    /// <summary>名字形如 <c>randNN</c>（NN 是两位数字）。</summary>
+    private static bool IsRandomTextureName(string lowerCaseName)
+        => lowerCaseName.Length >= 6 &&
+           lowerCaseName.StartsWith("rand", StringComparison.Ordinal) &&
+           char.IsAsciiDigit(lowerCaseName[4]) &&
+           char.IsAsciiDigit(lowerCaseName[5]);
+
+    /// <summary>
+    /// 拼出 <c>rotationY * rotationZ * translation * rotationX</c>（列主序），
+    /// 与 C++ 里 <c>tempMatrices[i] = randomTranslation * rotationX; tempMatrices[i] = rotationZ * ...</c> 的顺序一致。
+    /// </summary>
+    private static float[] ComposeRandomMatrix(float translateX, float translateY, float translateZ,
+                                               float rotX, float rotY, float rotZ)
+    {
+        float[] matrix = MultiplyColumnMajor(Translation(translateX, translateY, translateZ), RotationX(rotX));
+        matrix = MultiplyColumnMajor(RotationZ(rotZ), matrix);
+        return MultiplyColumnMajor(RotationY(rotY), matrix);
+    }
+
+    /// <summary>列主序 4x4 相乘：<c>result = a * b</c>。</summary>
+    private static float[] MultiplyColumnMajor(float[] a, float[] b)
+    {
+        var result = new float[16];
+
+        for (int column = 0; column < 4; column++)
+        {
+            for (int row = 0; row < 4; row++)
+            {
+                float sum = 0;
+                for (int k = 0; k < 4; k++)
+                {
+                    sum += a[k * 4 + row] * b[column * 4 + k];
+                }
+
+                result[column * 4 + row] = sum;
+            }
+        }
+
+        return result;
+    }
+
+    private static float[] Translation(float x, float y, float z) =>
+    [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        x, y, z, 1,
+    ];
+
+    private static float[] RotationX(float angle)
+    {
+        float c = MathF.Cos(angle);
+        float s = MathF.Sin(angle);
+
+        return
+        [
+            1, 0, 0, 0,
+            0, c, s, 0,
+            0, -s, c, 0,
+            0, 0, 0, 1,
+        ];
+    }
+
+    private static float[] RotationY(float angle)
+    {
+        float c = MathF.Cos(angle);
+        float s = MathF.Sin(angle);
+
+        return
+        [
+            c, 0, -s, 0,
+            0, 1, 0, 0,
+            s, 0, c, 0,
+            0, 0, 0, 1,
+        ];
+    }
+
+    private static float[] RotationZ(float angle)
+    {
+        float c = MathF.Cos(angle);
+        float s = MathF.Sin(angle);
+
+        return
+        [
+            c, s, 0, 0,
+            -s, c, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ];
     }
 
     private static void AddDeclaration(ISet<string> declarations, string declaration)

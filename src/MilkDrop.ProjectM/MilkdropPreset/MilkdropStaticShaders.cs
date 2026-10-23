@@ -17,7 +17,10 @@ namespace MilkDrop.ProjectM.MilkdropPreset;
 /// <c>#version 330</c> 还是 <c>#version 300 es</c>；本移植只走 GLES 3.0 分支（plan D1），
 /// 因此版本头与 <c>GLSLGenerator::Version</c> 固定为 300 es。
 /// </para>
-/// <para>当前打包了预设头、两个预设顶点着色器与模糊链的 3 个着色器；其余静态着色器随 P4 一并加入。</para>
+/// <para>
+/// 当前打包了预设头、两个预设顶点 / 一个默认 warp 片元着色器、模糊链的 3 个着色器，
+/// 以及 motion vectors 顶点着色器与 "无纹理 / 有纹理" 两个通用绘制着色器。
+/// </para>
 /// </remarks>
 public sealed class MilkdropStaticShaders
 {
@@ -54,6 +57,12 @@ public sealed class MilkdropStaticShaders
     /// <summary>warp 预设的顶点着色器（对应 <c>GetPresetWarpVertexShader()</c>）。</summary>
     public string GetPresetWarpVertexShader() => ReadResource("PresetWarpVertexShaderGlsl330.vert", addVersionHeader: true);
 
+    /// <summary>
+    /// 默认 warp 片元着色器（对应 <c>GetPresetWarpFragmentShader()</c>）：
+    /// 预设没有 warp shader 时，用它与 <see cref="GetPresetWarpVertexShader"/> 组成固定管线。
+    /// </summary>
+    public string GetPresetWarpFragmentShader() => ReadResource("PresetWarpFragmentShaderGlsl330.frag", addVersionHeader: true);
+
     /// <summary>composite 预设的顶点着色器（对应 <c>GetPresetCompVertexShader()</c>）。</summary>
     public string GetPresetCompVertexShader() => ReadResource("PresetCompVertexShaderGlsl330.vert", addVersionHeader: true);
 
@@ -65,6 +74,26 @@ public sealed class MilkdropStaticShaders
 
     /// <summary>模糊链垂直 pass 的片元着色器（对应 <c>GetBlur2FragmentShader()</c>）。</summary>
     public string GetBlur2FragmentShader() => ReadResource("Blur2FragmentShaderGlsl330.frag", addVersionHeader: true);
+
+    /// <summary>运动矢量线的顶点着色器（对应 <c>GetPresetMotionVectorsVertexShader()</c>）。</summary>
+    public string GetPresetMotionVectorsVertexShader()
+        => ReadResource("PresetMotionVectorsVertexShaderGlsl330.vert", addVersionHeader: true);
+
+    /// <summary>不贴图的通用顶点着色器（对应 <c>GetUntexturedDrawVertexShader()</c>）。</summary>
+    public string GetUntexturedDrawVertexShader()
+        => ReadResource("UntexturedDrawVertexShaderGlsl330.vert", addVersionHeader: true);
+
+    /// <summary>不贴图的通用片元着色器（对应 <c>GetUntexturedDrawFragmentShader()</c>）。</summary>
+    public string GetUntexturedDrawFragmentShader()
+        => ReadResource("UntexturedDrawFragmentShaderGlsl330.frag", addVersionHeader: true);
+
+    /// <summary>贴图的通用顶点着色器（对应 <c>GetTexturedDrawVertexShader()</c>）。</summary>
+    public string GetTexturedDrawVertexShader()
+        => ReadResource("TexturedDrawVertexShaderGlsl330.vert", addVersionHeader: true);
+
+    /// <summary>贴图的通用片元着色器（对应 <c>GetTexturedDrawFragmentShader()</c>）。</summary>
+    public string GetTexturedDrawFragmentShader()
+        => ReadResource("TexturedDrawFragmentShaderGlsl330.frag", addVersionHeader: true);
 
     private string ReadResource(string fileName, bool addVersionHeader)
     {

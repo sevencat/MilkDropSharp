@@ -18,6 +18,8 @@
     <EmbeddedResource Include="MilkdropPreset\Shaders\*.inc" />
     <EmbeddedResource Include="MilkdropPreset\Shaders\*.vert" />
     <EmbeddedResource Include="MilkdropPreset\Shaders\*.frag" />
+    <!-- 过渡着色器（C++ 侧由 GenerateBuiltInTransitionsResources.cmake 读成字符串常量） -->
+    <EmbeddedResource Include="Renderer\TransitionShaders\*.*" />
     <!-- idle 预设用的两张纹理（C++ 侧是 IdleTextures.hpp 里的 32 位 TGA 字节数组） -->
     <EmbeddedResource Include="IdleTextures\*.tga" />
   </ItemGroup>

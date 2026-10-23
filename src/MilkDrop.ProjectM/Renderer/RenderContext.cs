@@ -38,4 +38,35 @@ public sealed class RenderContext
 
     /// <summary>per-pixel/per-vertex 网格 Y 分辨率。</summary>
     public int PerPixelMeshY { get; set; } = 48;
+
+    /// <summary>纹理管理器（C++ 里的 <c>textureManager</c> 裸指针）。</summary>
+    public TextureManager? TextureManager { get; set; }
+
+    /// <summary>
+    /// 把另一份渲染上下文拷进本实例（对应 C++ 的值赋值 <c>m_state.renderContext = renderContext</c>，
+    /// 因为预设持有自己的 <see cref="RenderContext"/> 副本）。
+    /// </summary>
+    public void CopyFrom(RenderContext other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        if (ReferenceEquals(this, other))
+        {
+            return;
+        }
+
+        Time = other.Time;
+        Frame = other.Frame;
+        Fps = other.Fps;
+        Progress = other.Progress;
+        ViewportSizeX = other.ViewportSizeX;
+        ViewportSizeY = other.ViewportSizeY;
+        AspectX = other.AspectX;
+        AspectY = other.AspectY;
+        InvAspectX = other.InvAspectX;
+        InvAspectY = other.InvAspectY;
+        PerPixelMeshX = other.PerPixelMeshX;
+        PerPixelMeshY = other.PerPixelMeshY;
+        TextureManager = other.TextureManager;
+    }
 }

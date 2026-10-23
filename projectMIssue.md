@@ -201,11 +201,13 @@ extensions  : EXT_color_buffer_float, EXT_color_buffer_half_float, OES_texture_f
 
 - **原因**：`LoadTexturesAndCompile(PresetState&)` / `LoadVariables(PresetState&, PerFrameContext&)`
   需要 `PresetState`、`TextureManager`、`BlurTexture`、`PerFrameContext`，这些随 P4/P6/P7 才进来。
-- **结论**：C# 的 `MilkdropShader` 只保留文本/转译部分：
+- **结论**：C# 的 `MilkdropShader` 保留文本/转译部分：
   `LoadCode` + `TranspileHLSLShader(main, blur, others)` + `LoadTexturesAndCompile(Shader, main, blur, others)`；
   描述符由调用方给，program 由调用方持有（C++ 的 `m_shader` 在构造时就建 GL 对象，C# 不这么早碰 GL）。
   `GetReferencedSamplers` 里顺带做了 C++ 放在 `LoadTexturesAndCompile` 的"直接写 `sampler_blur1/2/3`"判定，
   结果等价（`UpdateMaxBlurLevel` 只升不降）。
+- **P4 已补**：`LoadVariables(PresetState, PerFrameContext)` 与
+  `LoadTexturesAndCompile(PresetState)` 都已按 C++ 实现（含主纹理每帧刷新、模糊链绑定、描述符 `TryUpdate`）。
 
 ---
 
@@ -222,9 +224,151 @@ extensions  : EXT_color_buffer_float, EXT_color_buffer_half_float, OES_texture_f
 - **结论**：先按现有 Eval 的行为接（`PerFrameContext` 只共享 `globalRegisters`），
   若要完全对齐，需要给 `CompileContext` 增加可注入的 global buffer（改动 Eval 层，留待 P6 切歌时评估）。
 
-### I-26 `PresetState` 的 GL 成员推迟
+### I-26 `PresetState` 的 GL 成员推迟（P4/P5 已补）
 
 - **原因**：`untexturedShader`/`texturedShader`/`mainTexture`/`blurTexture` 依赖静态着色器全集与
   `BlurTexture`、`TextureManager`（P4/P7）。
-- **结论**：本阶段 `PresetState` 只做数据、代码与表达式运行时（`GlobalRegisters`/`FrameQVariables`/
-  `AudioData`/`RenderContext`/`RandomTextureDescriptors`）；GL 成员随 warp/composite 通路一起补。
+- **结论（已补）**：`UntexturedShader`/`TexturedShader` 做成**惰性**属性（首次访问才编译），
+  这样纯数据测试仍然不需要 GL；`MainTexture` 由 `MilkdropPreset` 每帧设置；`BlurTexture` 惰性创建。
+  `Dispose` 里只在 `GlContext.IsInitialized` 时释放 GL 对象。
+
+### I-27 `GetSafeBlurMinMaxValues` 把区间撑开时写成了 `avg - 0.05`
+
+- **证据**：`BlurTexture.cpp:392-397`（以及 2、3 级）在区间宽度小于 0.1 时执行
+  `blurMin = avg - fMinDist * 0.5f; blurMax = avg - fMinDist * 0.5f;`——min/max 被设成同一个值，
+  而不是 `avg ± 0.05`，随后 `scale = 1 / (max - min)` 会变成 inf。
+- **结论**：逐行照抄（`BlurTexture.GetSafeBlurMinMaxValues`），让画面与原生一致；
+  测试 `GetSafeBlurMinMaxValues_WidensTooNarrowRange` 钉住这个行为。
+
+### I-28 3D 噪声平滑里 `base_y` 用的是 `z * size + y * size`
+
+- **证据**：`MilkdropNoise.cpp:247`、`257`：X 方向插值的基址写成 `z * size + y * size`，
+  正确应是 `z * size * size + y * size`；因此 `z > 0` 的切片会被写到别的层上。
+- **结论**：逐行照抄（`MilkdropNoise.Generate3D`），注释里标了出处。视觉上是噪声纹路，
+  与原生一致比"修正"更重要。
+
+### I-29 纹理淘汰的年龄相同时会 0/0
+
+- **证据**：`TextureManager.cpp:143` `(age - newest) / (oldest - newest)`，当参与比较的纹理年龄全相同时
+  分母为 0（float 下得到 NaN），随后 `(uint32_t)(sizeBytes * NaN)` 变成 0，结果就是**一张都不淘汰**。
+- **结论**：C# 保持同样算法（`float` 除零同样得到 NaN，转 uint 得 0）；测试里用两张不同年龄的纹理
+  覆盖真正会淘汰的分支。另外 `GetTexture` 的注释说"Resets the texture age to zero"，但实现里并没有重置，
+  C# 同样不重置。
+
+### I-30 空的纹理描述符不会自动重新解析
+
+- **证据**：`MilkdropShader::LoadVariables` 里对每个纹理描述符有
+  `if (desc.Empty()) { desc.TryUpdate(*textureManager); }`，用来在纹理被淘汰后重新取。
+  `TextureSamplerDescriptor::TryUpdate` 依赖 `TextureManager` 的 `weak_ptr` 语义。
+- **现状（P7 已补）**：描述符改用 `WeakReference<Texture>` 保存纹理，`LoadVariables` 里在绑定前
+  调用 `TryUpdate`（`UpdateFailed` 之后不再重试）。
+- **注意**：`TextureManager::GetTexture` 对找不到的名字会回落到占位纹理，因此 `TryUpdate` 拿到的
+  描述符通常"非空"，`UpdateFailed` 只在管理器整体不可用时才置位——与 C++ 行为一致。
+
+---
+
+## P5（波形与形状）阶段
+
+- 16 种波形逐行照抄（含 4 个 Milkdrop2077 追加波形里"`sample + Samples - sampleOffset`"这种
+  刻意越界的写法），`WaveformMath.SmoothWave` 与 `CustomWaveform.SmoothWave` 各自保留
+  （前者 2N-1 个点、后者 2N 个点，C++ 就是这样）。
+- `CustomShape` 需要两套 VAO/VBO（贴图 / 不贴图），基类 VAO 留给描边；与 C++ 一致。
+- 读取 `shapecode_N_image`（projectM 扩展）、`wavecode_N_bDrawThick`/`shapecode_N_thickOutline`。
+
+---
+
+## P6（音频 + 切换）阶段
+
+### I-31 `PresetTransition` 的噪声纹理解绑用了错误的单元号
+
+- **证据**：`PresetTransition.cpp:125-128`：循环里 `noiseDescriptors[i - 2].Unbind(textureUnit)`，
+  而 `textureUnit` 此时已经是循环结束后的值（12），不是每个描述符自己的单元号。
+- **结论**：C# 按 `i + 2` 解绑（`Renderer/PresetTransition.cs`）。视觉上无差别（下一帧会重新绑定），
+  但避免了把别的单元也一起解绑。
+
+### I-32 转场着色器是"数据驱动"的，没有 6 个 C++ 类
+
+- **证据**：`Renderer/TransitionShaders/*.frag` 只有 6 段 `mainImage` 实现，
+  `TransitionShaderManager` 把公共头 + 实现 + `main()` 拼起来编译。
+- **结论**：plan 里"6 种转场类"实际落成 `TransitionShaderSources`（6 个字符串访问器）+
+  `TransitionShaderManager`（编译/随机取）+ `PresetTransition`（每帧画 quad），文件数与 C++ 对齐。
+
+---
+
+## P7（纹理管理）阶段
+
+`TextureManager` / `MilkdropNoise` 在 P4 就跟着 warp shader 一起进来了（预设没有纹理时跑不起来），
+P7 补的是**淘汰联动**：I-30 的 `TryUpdate` + 描述符弱引用。测试覆盖"空描述符能重取"、
+"找不到时回落占位纹理"、"有效描述符不被替换"三条分支。
+
+---
+
+## P8（应用层）阶段
+
+### I-34 `ProjectM` 类改名 `ProjectMEngine`
+
+- **原因**：C++ 的 `libprojectM::ProjectM` 在 C# 里与命名空间 `MilkDrop.ProjectM` 同名，
+  引用时类型名会被解析成命名空间，无法使用。
+- **结论**：引擎门面叫 `ProjectMEngine`（`src/MilkDrop.ProjectM/ProjectMEngine.cs`）。
+
+### I-35 `ParseFilename` 只认 `/`，Windows 路径会得到空文件名
+
+- **证据**：`MilkdropPreset.cpp` 里 `ParseFilename` 用 `find_last_of('/')`，`\` 不认。
+  C# 照抄（并有测试钉住 `ParseFilename(@"C:\x\a.milk") == ""`）。
+- **影响**：Windows 上 `Preset.FileName` 是空串。
+- **结论**：`ProjectMEngine.ActivePresetFileName` 在 `FileName` 为空时回退到"加载时用的完整路径/URL"，
+  这样 UI 和测试都有可读名字；`Preset.FileName` 本身保持 C++ 语义不变。
+
+### I-36 批量跑里的"全黑"不全是 bug
+
+- **证据**：`presets-cream-of-the-crop/! Transition/*` 这批预设的设计就是"过渡到黑"
+  （名字里直接写着 Fast/Slow transition to black），120 帧时本来就该是黑的。
+- **结论**：`--bench` 报告里 `non_black_ratio` 只是"信息列"，不当失败条件；
+  失败判定只看加载异常与 `glGetError`。
+
+### I-37 ImGui 上下文在 `--bench` 模式下不能 `DestroyContext`
+
+- **现象**：bench 结束时 `OnClosing` 里 `ImGui.DestroyContext()` 让进程 0xC0000005 崩溃。
+- **原因**：`--bench` 分支不建 ImGui 上下文（没有输入上下文、没有渲染器），
+  但 `OnClosing` 用 `_options.ShowUi` 判断，仍为 true。
+- **结论**：改用 `_imguiContextCreated` 标志，只有真的创建过才销毁。
+
+### I-38 新增两个 NuGet 依赖
+
+- `NAudio` 2.2.1：WASAPI 环回采集（`AudioCapture`），无设备时构造不抛异常、静音降级。
+- `StbImageWriteSharp` 1.16.7：PNG 写出（`Screenshot`），与已有的 `StbImageSharp` 同作者。
+- 两者都只在 App 层，核心库 `MilkDrop.ProjectM` 不引入音频/图片依赖。
+
+---
+
+## P9（验证打磨）阶段
+
+### I-40 高 DPI 下不能靠"OnLoad 里改 window.Size"来放大窗口
+
+- **现象**：1.75x DPI 的机器上，界面只铺满左上角一块、其余是白的，截图尺寸也对不上。
+- **原因**：EGL window surface 在 `EglContext.CreateForWindow(hwnd)` 时按**当时的客户区尺寸**定型；
+  而 `window.Size = ...` 在 GLFW 下是异步请求，OnLoad 阶段改完立刻建 surface，
+  就会出现 surface 还是旧尺寸、视口按新尺寸的错位。
+- **结论**：窗口尺寸只用 `--width/--height` 决定，不再按 DPI 放大；
+  DPI 只放大 ImGui 字体与控件尺寸。渲染相关的尺寸统一取 `window.FramebufferSize`
+  （视口、ReadPixels、`SetWindowSize`、bench 报告尺寸都用它），不要用 `window.Size`。
+
+### I-39 预设自身的语法错误表现为"加载失败"（与原生一致）
+
+- **证据**：例如 `martin - purple pulsator - mom - ns2w.milk` 的
+  `per_frame_22=k1 =  is_` / `per_frame_23=beat*equal(index%2,0);`，被换行拆断成两条语句。
+- **行为**：C++ 的 `PresetFileParser::GetCode` 也是逐行拼 `\n`，`compile` 同样失败并抛
+  `MilkdropCompileException`，`Preset::Initialize` 失败 → 整个预设加载失败。
+- **结论**：保持"抛异常 = 报 PresetSwitchFailed"的行为，不静默吞掉；这类预设进 P9 失败清单。
+
+---
+
+## 通用（跨阶段）
+
+### I-33 预设类名与命名空间同名
+
+- **证据**：C++ 是 `namespace MilkdropPreset { class MilkdropPreset; }`，C# 照搬会得到
+  `namespace MilkDrop.ProjectM.MilkdropPreset` + `class MilkdropPreset`。
+- **影响**：在 `using MilkDrop.ProjectM.MilkdropPreset;` 之后写简单名 `MilkdropPreset` 会解析成**命名空间**，
+  必须写完整名或别名（测试里用了 `using MilkdropPresetType = ...`）。
+- **结论**：保留同名以对齐 C++ 的映射表；对外部调用者（P8 App 层）统一用别名。

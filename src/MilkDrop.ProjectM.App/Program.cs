@@ -1,30 +1,39 @@
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Text;
 using ImGuiNET;
 using MilkDrop.ProjectM.Rendering;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGLES;
 using Silk.NET.Windowing;
+using PresetPlaylist = MilkDrop.ProjectM.Playlist.Playlist;
 
 namespace MilkDrop.ProjectM.App;
 
 /// <summary>
-/// 入口。对应 <c>refcode/projectM/frontend-sdl-cpp-2.0.0-pre1</c> 里 SDL 前端的工作：
-/// 建窗口 → 建 GL 上下文 → 主循环，只是这里换成 Silk.NET.Windowing + ANGLE(EGL) + ImGui。
+/// 入口：窗口 + ANGLE/EGL 上下文 + 引擎 + ImGui 叠加层。
 /// </summary>
 /// <remarks>
-/// P0 阶段只做"环境打通"：窗口、EGL/GLES3 上下文、能力探测、ImGui 叠加层、SwapBuffers。
-/// 预设渲染在 P2/P4 接入 <c>MilkDrop.ProjectM</c>。
+/// 对应 <c>refcode/projectM/frontend-sdl-cpp-2.0.0-pre1</c> 里 SDL 前端的工作（建窗口、主循环、
+/// 快捷键、预设切换），只是这里换成 Silk.NET.Windowing + ANGLE(EGL) + ImGui。
 /// </remarks>
 internal static class Program
 {
     private static IWindow? _window;
     private static EglContext? _context;
     private static ImguiGles3Renderer? _imguiRenderer;
-    private static ImguiInput? _input;
+    private static bool _imguiContextCreated;
+    private static ImguiInput? _imguiInput;
+    private static IInputContext? _inputContext;
+    private static Hotkeys? _hotkeys;
     private static GpuCapabilities? _capabilities;
+
+    private static ProjectMEngine? _engine;
+    private static AudioCapture? _audio;
+    private static PresetLibrary _library = new();
+    private static PresetPlaylist? _playlist;
 
     private static AppOptions _options = new();
     private static float _uiScale = 1f;
@@ -36,9 +45,13 @@ internal static class Program
     private static int _framesRendered;
     private static int _swapFailures;
     private static bool _showDemo;
-    private static bool _windowOpen = true;
-    private static string _status = "starting";
+    private static bool _showHelp;
+    private static bool _showUi = true;
+    private static int _exitCode;
     private static string? _lastError;
+    private static string? _lastScreenshot;
+
+    private static string _searchText = string.Empty;
 
     /// <summary>100% DPI 下的字号（ImGui 默认 13px 偏小）。</summary>
     private const float BaseFontSize = 18f;
@@ -60,11 +73,12 @@ internal static class Program
         }
 
         _options = options;
+        _showUi = options.ShowUi;
 
         // 日志里有中文，固定成 UTF-8，避免重定向到文件时变乱码。
         try
         {
-            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            Console.OutputEncoding = Encoding.UTF8;
         }
         catch (Exception)
         {
@@ -104,7 +118,7 @@ internal static class Program
         try
         {
             window.Run();
-            return _lastError is null ? 0 : 1;
+            return _exitCode != 0 ? _exitCode : _lastError is null ? 0 : 1;
         }
         catch (Exception ex)
         {
@@ -120,17 +134,10 @@ internal static class Program
             throw new PlatformNotSupportedException("当前窗口句柄不是 Win32（ANGLE/EGL 路径只在 Windows 上验证）。");
         }
 
+        // 高 DPI 下只放大字体与控件尺寸，**不改窗口尺寸**：
+        // EGL surface 在 CreateForWindow 时按窗口客户区定型，OnLoad 里改 window.Size 属于异步请求，
+        // 会出现"surface 还是旧尺寸、视口按新尺寸"的错位（画面只铺满左上角、截图尺寸也不对）。
         _uiScale = options.UiScale > 0 ? options.UiScale : QueryUiScale(win32.Hwnd);
-
-        // 高 DPI 屏上 18px 字体仍然偏小，按 DPI 等比放大窗口（EGL 表面尺寸跟随窗口，之后再建）。
-        if (_uiScale > 1.001f)
-        {
-            var scaled = new Vector2D<int>(
-                (int)(window.Size.X * _uiScale),
-                (int)(window.Size.Y * _uiScale));
-            Console.WriteLine($"DPI 缩放 {_uiScale:0.##}x，窗口放大到 {scaled.X}x{scaled.Y}");
-            window.Size = scaled;
-        }
 
         var stopwatch = Stopwatch.StartNew();
         _context = EglContext.CreateForWindow(win32.Hwnd, options.VSync);
@@ -144,28 +151,227 @@ internal static class Program
         Console.WriteLine(_capabilities.ToLogString());
         Console.WriteLine("------------------------------");
 
-        if (options.ShowUi)
+        // 输入上下文同时供 ImGui 与快捷键使用（Silk 要求只创建一次）。
+        if (!options.Bench)
         {
-            ImGui.CreateContext();
-            var io = ImGui.GetIO();
-            io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
-            ImGui.StyleColorsDark();
-            ImGui.GetStyle().ScaleAllSizes(_uiScale);
+            _inputContext = window.CreateInput();
 
-            if (!LoadUiFont(io, out string? uiFontPath))
+            if (options.ShowUi)
             {
-                Console.WriteLine("未找到系统中文字体，ImGui 用默认字体（中文会显示为方块）。");
-            }
-            else
-            {
-                Console.WriteLine("ImGui 中文字体: " + uiFontPath);
+                ImGui.CreateContext();
+                _imguiContextCreated = true;
+                var io = ImGui.GetIO();
+                io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+                ImGui.StyleColorsDark();
+                ImGui.GetStyle().ScaleAllSizes(_uiScale);
+
+                if (!LoadUiFont(io, out string? uiFontPath))
+                {
+                    Console.WriteLine("未找到系统中文字体，ImGui 用默认字体（中文会显示为方块）。");
+                }
+                else
+                {
+                    Console.WriteLine("ImGui 中文字体: " + uiFontPath);
+                }
+
+                _imguiRenderer = new ImguiGles3Renderer(_context.Gl);
+                _imguiInput = new ImguiInput(_inputContext);
             }
 
-            _imguiRenderer = new ImguiGles3Renderer(_context.Gl);
-            _input = new ImguiInput(window.CreateInput());
+            _hotkeys = new Hotkeys(_inputContext);
+            _hotkeys.Triggered += OnHotkey;
         }
 
-        _status = "ready";
+        CreateEngine(window, options);
+
+        if (_context is not null)
+        {
+            (int fbWidth, int fbHeight) = GetFramebufferSize(_context.Gl, window);
+            Console.WriteLine($"窗口 {window.Size.X}x{window.Size.Y}    绘制缓冲 {fbWidth}x{fbHeight}    DPI 缩放 {_uiScale:0.##}x");
+        }
+    }
+
+    private static void CreateEngine(IWindow window, AppOptions options)
+    {
+        if (_context is null)
+        {
+            return;
+        }
+
+        var textureDirectories = new List<string>(options.TextureDirectories);
+
+        if (textureDirectories.Count == 0)
+        {
+            string defaultTextures = Path.Combine(AppContext.BaseDirectory, "textures");
+
+            if (Directory.Exists(defaultTextures))
+            {
+                textureDirectories.Add(defaultTextures);
+            }
+        }
+
+        (int fbWidth, int fbHeight) = GetFramebufferSize(_context.Gl, window);
+
+        _engine = new ProjectMEngine(textureDirectories);
+        _engine.SetWindowSize(fbWidth, fbHeight);
+        ApplyOptionsToEngine(_engine, options);
+
+        // 引擎请求换预设（时长到 / 节拍硬切）时自动加载下一个。
+        _engine.PresetSwitchRequested += hardCut => PlayNext(smooth: !hardCut);
+
+        _engine.PresetSwitchFailed += (file, message) =>
+        {
+            _lastError = $"{Path.GetFileName(file)}: {message}";
+            Console.Error.WriteLine($"预设加载失败 {file}: {message}");
+        };
+
+        BuildLibrary(options);
+
+        if (_engine.PresetLocked)
+        {
+            _engine.PresetLocked = false;
+        }
+
+        if (!options.NoAudio)
+        {
+            _audio = new AudioCapture(_engine.Pcm);
+        }
+
+        if (options.Bench)
+        {
+            IReadOnlyList<string> presets = _library.All.Count > 0
+                ? _library.All
+                : DefaultPresets();
+
+            if (options.BenchSkip > 0)
+            {
+                presets = presets.Skip(options.BenchSkip).ToArray();
+            }
+
+            if (options.BenchLimit > 0 && presets.Count > options.BenchLimit)
+            {
+                presets = presets.Take(options.BenchLimit).ToArray();
+            }
+
+            _exitCode = Benchmark.Run(_context.Gl, _engine, presets, Math.Max(1, options.BenchFrames),
+                options.BenchReport, options.BenchShots, fbWidth, fbHeight);
+
+            window.Close();
+            return;
+        }
+
+        // 启动时优先加载 --preset，否则加载清单里的第一个。
+        if (!string.IsNullOrEmpty(options.PresetFile))
+        {
+            _library.AddFile(options.PresetFile);
+            _engine.LoadPresetFile(options.PresetFile, smoothTransition: false);
+        }
+        else if (_library.All.Count > 0)
+        {
+            LoadPlaylistIndex(0, smooth: false);
+        }
+    }
+
+    private static void ApplyOptionsToEngine(ProjectMEngine engine, AppOptions options)
+    {
+        if (options.PresetDuration > 0)
+        {
+            engine.PresetDuration = options.PresetDuration;
+        }
+
+        if (options.BlendDuration > 0)
+        {
+            engine.SoftCutDuration = options.BlendDuration;
+        }
+
+        if (options.HardCut)
+        {
+            engine.HardCutEnabled = true;
+        }
+
+        if (options.HardCutSensitivity > 0)
+        {
+            engine.HardCutSensitivity = options.HardCutSensitivity;
+        }
+
+        if (options.BeatSensitivity > 0)
+        {
+            engine.BeatSensitivity = options.BeatSensitivity;
+        }
+
+        if (options.MeshX > 0 && options.MeshY > 0)
+        {
+            engine.SetMeshSize((uint)options.MeshX, (uint)options.MeshY);
+        }
+
+        if (options.TargetFps > 0)
+        {
+            engine.TargetFramesPerSecond = options.TargetFps;
+        }
+
+        if (options.AspectCorrection is { } aspect)
+        {
+            engine.AspectCorrection = aspect;
+        }
+    }
+
+    private static void BuildLibrary(AppOptions options)
+    {
+        _library = new PresetLibrary();
+
+        foreach (string directory in options.PresetDirectories)
+        {
+            int added = _library.AddDirectory(directory);
+            Console.WriteLine($"扫描预设目录 {directory}: +{added}");
+        }
+
+        if (!string.IsNullOrEmpty(options.PlaylistFile))
+        {
+            int added = _library.AddPlaylistFile(options.PlaylistFile);
+            Console.WriteLine($"读取播放列表 {options.PlaylistFile}: +{added}");
+        }
+
+        if (!string.IsNullOrEmpty(options.PresetFile))
+        {
+            // 只为让 --preset 的预设出现在 UI 列表里，实际加载在 CreateEngine 末尾。
+            _library.AddFile(options.PresetFile);
+        }
+
+        // 没有显式指定时，尝试 exe 旁边的 presets 目录。
+        if (_library.All.Count == 0)
+        {
+            string defaultPresets = Path.Combine(AppContext.BaseDirectory, "presets");
+
+            if (Directory.Exists(defaultPresets))
+            {
+                int added = _library.AddDirectory(defaultPresets);
+                Console.WriteLine($"扫描默认预设目录 {defaultPresets}: +{added}");
+            }
+        }
+
+        _playlist = new PresetPlaylist();
+
+        foreach (string preset in _library.All)
+        {
+            _playlist.AddItem(preset, PresetPlaylist.InsertAtEnd, allowDuplicates: false);
+        }
+
+        _playlist.SetShuffle(options.Shuffle);
+
+        Console.WriteLine($"预设清单: {_library.All.Count} 个{(options.Shuffle ? "（随机播放）" : string.Empty)}");
+    }
+
+    private static IReadOnlyList<string> DefaultPresets()
+    {
+        var library = new PresetLibrary();
+        string defaultPresets = Path.Combine(AppContext.BaseDirectory, "presets");
+
+        if (Directory.Exists(defaultPresets))
+        {
+            library.AddDirectory(defaultPresets);
+        }
+
+        return library.All;
     }
 
     private static void OnRender(double deltaSeconds)
@@ -176,8 +382,7 @@ internal static class Program
         }
 
         var gl = context.Gl;
-        var width = Math.Max(1, window.Size.X);
-        var height = Math.Max(1, window.Size.Y);
+        (int width, int height) = GetFramebufferSize(gl, window);
 
         try
         {
@@ -193,28 +398,44 @@ internal static class Program
                 _fpsFrames = 0;
             }
 
-            // 底色随时间轻微呼吸：肉眼确认 swapchain / vsync 是否正常工作。
-            var wave = (float)((Math.Sin(_elapsed * 0.7) + 1) * 0.5);
-            gl.Viewport(0, 0, (uint)width, (uint)height);
-            gl.ClearColor(0.05f + 0.08f * wave, 0.07f, 0.12f + 0.10f * (1 - wave), 1f);
-            gl.Clear((uint)GLEnum.ColorBufferBit);
-
-            if (_imguiRenderer is not null && _input is not null)
+            if (_engine is not null)
             {
-                _input.NewFrame(width, height, deltaSeconds);
+                _engine.SetWindowSize(width, height);
+                _engine.RenderFrame();
+            }
+            else
+            {
+                gl.Viewport(0, 0, (uint)width, (uint)height);
+                gl.ClearColor(0.05f, 0.07f, 0.12f, 1f);
+                gl.Clear((uint)GLEnum.ColorBufferBit);
+            }
+
+            if (_imguiRenderer is not null && _imguiInput is not null && _showUi)
+            {
+                _imguiInput.NewFrame(width, height, deltaSeconds);
                 BuildUi();
                 ImGui.Render();
                 _imguiRenderer.Render(ImGui.GetDrawData(), width, height);
             }
 
-            // smoke 模式前几帧做自检：确认 ImGui 真的产出了绘制指令、GL 没报错。
-            if (_options.SmokeFrames > 0 && _framesRendered < 3 && _imguiRenderer is not null)
+            // smoke 模式前几帧做自检：确认渲染链路真的跑起来、GL 没报错。
+            if (_options.SmokeFrames > 0 && _framesRendered < 3)
             {
-                var drawData = ImGui.GetDrawData();
                 var glError = (int)gl.GetError();
                 Console.WriteLine(
-                    $"帧 {_framesRendered} 自检: ImGui 指令列表={drawData.CmdListsCount}, "
-                    + $"顶点={drawData.TotalVtxCount}, 索引={drawData.TotalIdxCount}, glGetError=0x{glError:X4}");
+                    $"帧 {_framesRendered} 自检: 预设={_engine?.ActivePresetFileName ?? "-"}, "
+                    + $"glGetError=0x{glError:X4}");
+            }
+
+            if (_options.ScreenshotEvery > 0 && _framesRendered % _options.ScreenshotEvery == 0)
+            {
+                SaveScreenshot($"frame-{_framesRendered:D5}.png");
+            }
+
+            // 无人值守的切换压测：每 N 帧换一个预设，覆盖"软切 → 转场结束 → 释放旧预设"这条路径。
+            if (_options.AutoNextFrames > 0 && _framesRendered > 0 && _framesRendered % _options.AutoNextFrames == 0)
+            {
+                PlayNext(smooth: true);
             }
 
             context.SwapBuffers();
@@ -222,6 +443,11 @@ internal static class Program
 
             if (_options.SmokeFrames > 0 && _framesRendered >= _options.SmokeFrames)
             {
+                if (!string.IsNullOrEmpty(_options.ScreenshotPath))
+                {
+                    SaveScreenshot(_options.ScreenshotPath);
+                }
+
                 Console.WriteLine($"smoke: 已渲染 {_framesRendered} 帧，平均 {_fps:0.0} FPS，退出。");
                 window.Close();
             }
@@ -235,15 +461,294 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// 真正可绘制的像素尺寸。
+    /// </summary>
+    /// <remarks>
+    /// 高 DPI 下 <c>window.Size</c>（逻辑尺寸）与 drawing buffer 尺寸可能不一致；
+    /// 视口、ReadPixels、ImGui 都必须用后者，否则画面只铺满左上角、截图尺寸也对不上。
+    /// </remarks>
+    private static (int Width, int Height) GetFramebufferSize(GL gl, IWindow window)
+    {
+        Vector2D<int> framebuffer = window.FramebufferSize;
+
+        int width = framebuffer.X > 0 ? framebuffer.X : window.Size.X;
+        int height = framebuffer.Y > 0 ? framebuffer.Y : window.Size.Y;
+
+        return (Math.Max(1, width), Math.Max(1, height));
+    }
+
+    private static void OnHotkey(HotkeyCommand command)
+    {
+        if (_engine is null || _window is null)
+        {
+            return;
+        }
+
+        switch (command)
+        {
+            case HotkeyCommand.TogglePause:
+                _engine.PresetLocked = !_engine.PresetLocked;
+                break;
+
+            case HotkeyCommand.NextPreset:
+                PlayNext(smooth: true);
+                break;
+
+            case HotkeyCommand.PreviousPreset:
+                PlayPrevious();
+                break;
+
+            case HotkeyCommand.RandomPreset:
+                if (_playlist is not null)
+                {
+                    _playlist.SetShuffle(true);
+                    PlayNext(smooth: true);
+                }
+
+                break;
+
+            case HotkeyCommand.ToggleLock:
+                _engine.PresetLocked = !_engine.PresetLocked;
+                break;
+
+            case HotkeyCommand.Screenshot:
+                SaveScreenshot($"shot-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+                break;
+
+            case HotkeyCommand.ToggleUi:
+                _showUi = !_showUi;
+                break;
+
+            case HotkeyCommand.ToggleHelp:
+                _showHelp = !_showHelp;
+                break;
+
+            case HotkeyCommand.Quit:
+                if (_showHelp)
+                {
+                    _showHelp = false;
+                }
+                else
+                {
+                    _window.Close();
+                }
+
+                break;
+        }
+    }
+
+    private static void PlayNext(bool smooth)
+    {
+        if (_engine is null || _playlist is null || _library.All.Count == 0)
+        {
+            return;
+        }
+
+        LoadPlaylistIndex(_playlist.NextPresetIndex(), smooth);
+    }
+
+    private static void PlayPrevious()
+    {
+        if (_engine is null || _playlist is null || _library.All.Count == 0)
+        {
+            return;
+        }
+
+        LoadPlaylistIndex(_playlist.PreviousPresetIndex(), smooth: true);
+    }
+
+    private static void LoadPlaylistIndex(uint index, bool smooth)
+    {
+        if (_engine is null || index >= _library.All.Count)
+        {
+            return;
+        }
+
+        string path = _library.All[(int)index];
+        _engine.LoadPresetFile(path, smooth);
+    }
+
+    private static void SaveScreenshot(string fileName)
+    {
+        if (_context is null || _window is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // 只给文件名时落到 exe 旁的 artifacts/shots；带目录（或绝对路径）就按宿主给的路径。
+            string path = Path.IsPathRooted(fileName)
+                          || fileName.Contains(Path.DirectorySeparatorChar)
+                          || fileName.Contains('/')
+                ? Path.GetFullPath(fileName)
+                : Path.Combine(AppContext.BaseDirectory, "artifacts", "shots", fileName);
+
+            (int width, int height) = GetFramebufferSize(_context.Gl, _window);
+            _lastScreenshot = Screenshot.Save(_context.Gl, width, height, path);
+            Console.WriteLine("截图: " + _lastScreenshot);
+        }
+        catch (Exception ex)
+        {
+            _lastError = "截图失败: " + ex.Message;
+            Console.Error.WriteLine(_lastError);
+        }
+    }
+
     private static void BuildUi()
     {
-        ImGui.SetNextWindowPos(new Vector2(16, 16), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Vector2(760, 520), ImGuiCond.FirstUseEver);
-
-        if (ImGui.Begin(UiText.WindowTitle, ref _windowOpen))
+        if (_engine is null || _inputContext is null)
         {
-            ImGui.Text(string.Format(UiText.StatusFormat, _status, _fps, _framesRendered, _swapFailures));
+            return;
+        }
+
+        ImGui.SetNextWindowPos(new Vector2(16, 16), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(780, 620), ImGuiCond.FirstUseEver);
+
+        if (ImGui.Begin(UiText.WindowTitle))
+        {
+            string state = _engine.PresetLocked ? UiText.Paused : UiText.Playing;
+            ImGui.Text(string.Format(UiText.StatusFormat, state, _fps, _framesRendered, _swapFailures));
+            ImGui.Text(_audio is { IsRunning: true } ? UiText.AudioRunning : UiText.AudioUnavailable);
+
+            string presetName = string.IsNullOrEmpty(_engine.ActivePresetFileName)
+                ? UiText.NoPreset
+                : Path.GetFileName(_engine.ActivePresetFileName);
+            ImGui.Text(string.Format(UiText.CurrentPresetFormat, presetName));
+            ImGui.ProgressBar((float)_engine.PresetProgress, new Vector2(-1, 0),
+                string.Format(UiText.ProgressFormat, _engine.PresetProgress * 100));
+
             ImGui.Separator();
+            ImGui.Text(UiText.PlaybackSection);
+
+            if (ImGui.Button(UiText.PreviousPreset))
+            {
+                PlayPrevious();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button(UiText.NextPreset))
+            {
+                PlayNext(smooth: true);
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button(UiText.RandomPreset))
+            {
+                OnHotkey(HotkeyCommand.RandomPreset);
+            }
+
+            ImGui.SameLine();
+            bool locked = _engine.PresetLocked;
+            if (ImGui.Checkbox(UiText.LockPreset, ref locked))
+            {
+                _engine.PresetLocked = locked;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button(UiText.TakeScreenshot))
+            {
+                SaveScreenshot($"shot-{DateTime.Now:yyyyMMdd-HHmmss}.png");
+            }
+
+            ImGui.Separator();
+            ImGui.Text(UiText.ParametersSection);
+
+            float beat = _engine.BeatSensitivity;
+            if (ImGui.SliderFloat(UiText.BeatSensitivity, ref beat, 0.0f, 2.0f))
+            {
+                _engine.BeatSensitivity = beat;
+            }
+
+            float duration = (float)_engine.PresetDuration;
+            if (ImGui.SliderFloat(UiText.PresetDuration, ref duration, 1.0f, 120.0f))
+            {
+                _engine.PresetDuration = duration;
+            }
+
+            float blend = (float)_engine.SoftCutDuration;
+            if (ImGui.SliderFloat(UiText.BlendDuration, ref blend, 0.0f, 10.0f))
+            {
+                _engine.SoftCutDuration = blend;
+            }
+
+            bool hardCut = _engine.HardCutEnabled;
+            if (ImGui.Checkbox(UiText.HardCutEnabled, ref hardCut))
+            {
+                _engine.HardCutEnabled = hardCut;
+            }
+
+            float hardCutSensitivity = _engine.HardCutSensitivity;
+            if (ImGui.SliderFloat(UiText.HardCutSensitivity, ref hardCutSensitivity, 0.1f, 8.0f))
+            {
+                _engine.HardCutSensitivity = hardCutSensitivity;
+            }
+
+            float easterEgg = _engine.EasterEgg;
+            if (ImGui.SliderFloat(UiText.RandomDuration, ref easterEgg, 0.0f, 10.0f))
+            {
+                _engine.EasterEgg = easterEgg;
+            }
+
+            int meshX = (int)_engine.MeshSize.X;
+            int meshY = (int)_engine.MeshSize.Y;
+            if (ImGui.SliderInt(UiText.MeshSize + " X", ref meshX, 8, 200))
+            {
+                _engine.SetMeshSize((uint)meshX, (uint)meshY);
+            }
+
+            if (ImGui.SliderInt(UiText.MeshSize + " Y", ref meshY, 8, 200))
+            {
+                _engine.SetMeshSize((uint)meshX, (uint)meshY);
+            }
+
+            bool aspect = _engine.AspectCorrection;
+            if (ImGui.Checkbox(UiText.AspectCorrection, ref aspect))
+            {
+                _engine.AspectCorrection = aspect;
+            }
+
+            ImGui.Separator();
+            ImGui.Text(UiText.PresetList);
+
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputTextWithHint("##search", UiText.SearchHint, ref _searchText, 128);
+
+            IReadOnlyList<string> filtered = _library.Filter(_searchText);
+            ImGui.Text(string.Format(UiText.PresetCountFormat, _library.All.Count, filtered.Count));
+
+            if (ImGui.BeginChild("preset-list", new Vector2(0, 220), ImGuiChildFlags.Border))
+            {
+                // 不做虚拟滚动，直接截断：几千条 Selectable 会拖慢 UI，搜索框足够用。
+                const int maxRows = 400;
+                int rowCount = Math.Min(filtered.Count, maxRows);
+
+                for (var i = 0; i < rowCount; i++)
+                {
+                    string path = filtered[i];
+
+                    if (ImGui.Selectable(Path.GetFileName(path)))
+                    {
+                        _engine.LoadPresetFile(path, smoothTransition: true);
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(path);
+                    }
+                }
+
+                if (filtered.Count > maxRows)
+                {
+                    ImGui.Text(string.Format(UiText.PresetListTruncatedFormat, maxRows));
+                }
+
+                ImGui.EndChild();
+            }
+
+            ImGui.Separator();
+            ImGui.Checkbox("ImGui demo", ref _showDemo);
 
             if (ImGui.Button(UiText.RequeryCapabilities))
             {
@@ -251,19 +756,9 @@ internal static class Program
                 Console.WriteLine(_capabilities?.ToLogString());
             }
 
-            ImGui.SameLine();
-            ImGui.Checkbox("ImGui demo", ref _showDemo);
-
-            ImGui.Separator();
-            if (_capabilities is not null)
+            if (_lastScreenshot is not null)
             {
-                var log = _capabilities.ToLogString();
-                if (ImGui.BeginChild("caps", new Vector2(0, 0), ImGuiChildFlags.Border))
-                {
-                    ImGui.TextUnformatted(log);
-                }
-
-                ImGui.EndChild();
+                ImGui.Text(string.Format(UiText.ScreenshotSavedFormat, _lastScreenshot));
             }
 
             if (_lastError is not null)
@@ -273,6 +768,17 @@ internal static class Program
         }
 
         ImGui.End();
+
+        if (_showHelp)
+        {
+            ImGui.SetNextWindowPos(new Vector2(820, 16), ImGuiCond.FirstUseEver);
+            if (ImGui.Begin(UiText.HotkeysTitle, ref _showHelp))
+            {
+                ImGui.TextUnformatted(UiText.HotkeysBody);
+            }
+
+            ImGui.End();
+        }
 
         if (_showDemo)
         {
@@ -284,21 +790,33 @@ internal static class Program
     {
         Console.WriteLine($"关闭：共渲染 {_framesRendered} 帧，最后 FPS {_fps:0.0}，总时长 {_elapsed:0.0}s");
 
-        _input?.Dispose();
+        _hotkeys?.Dispose();
+        _audio?.Dispose();
+        _engine?.Dispose();
+
+        _hotkeys = null;
+        _audio = null;
+        _engine = null;
+
+        _imguiInput?.Dispose();
         _imguiRenderer?.Dispose();
+        _inputContext?.Dispose();
         _context?.Dispose();
-        _input = null;
+
+        _imguiInput = null;
         _imguiRenderer = null;
+        _inputContext = null;
         _context = null;
 
-        if (_options.ShowUi)
+        if (_imguiContextCreated)
         {
             ImGui.DestroyContext();
+            _imguiContextCreated = false;
         }
     }
 
     /// <summary>默认字体没有中文字形，这里挂一个系统中文字体（找不到就退回默认字体）。</summary>
-    private static bool LoadUiFont(ImGuiIOPtr io, out string? fontPath)
+    private static unsafe bool LoadUiFont(ImGuiIOPtr io, out string? fontPath)
     {
         var fontSize = BaseFontSize * _uiScale;
         fontPath = null;
@@ -311,6 +829,10 @@ internal static class Program
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "simsun.ttc"),
         ];
 
+        // 只加载界面真正用到的字：ChineseSimplifiedCommon（约 2500 字）会漏"频""帧"这类字，
+        // ChineseFull（2 万字）又把图集撑到 4096²。按 UiText 精确取字符两边都避开。
+        ushort[] glyphRanges = BuildGlyphRanges();
+
         foreach (var path in candidates)
         {
             if (!File.Exists(path))
@@ -320,7 +842,11 @@ internal static class Program
 
             try
             {
-                io.Fonts.AddFontFromFileTTF(path, fontSize, null, io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
+                fixed (ushort* ranges = glyphRanges)
+                {
+                    io.Fonts.AddFontFromFileTTF(path, fontSize, null, (nint)ranges);
+                }
+
                 fontPath = path;
                 return true;
             }
@@ -331,6 +857,42 @@ internal static class Program
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 生成 ImGui 的 glyph range：ASCII 可见区 + <see cref="UiText"/> 里出现的每个非 ASCII 字符。
+    /// </summary>
+    /// <remarks>格式是 <c>[begin, end]</c> 成对出现，最后以 0 结尾。</remarks>
+    private static ushort[] BuildGlyphRanges()
+    {
+        var characters = new SortedSet<ushort>();
+
+        for (var code = 0x20; code <= 0x7E; code++)
+        {
+            characters.Add((ushort)code);
+        }
+
+        foreach (string text in GetUiTexts())
+        {
+            foreach (char c in text)
+            {
+                if (c > 0x7E)
+                {
+                    characters.Add(c);
+                }
+            }
+        }
+
+        var ranges = new List<ushort>(characters.Count * 2 + 2);
+
+        foreach (ushort character in characters)
+        {
+            ranges.Add(character);
+            ranges.Add(character);
+        }
+
+        ranges.Add(0);
+        return ranges.ToArray();
     }
 
     /// <summary>

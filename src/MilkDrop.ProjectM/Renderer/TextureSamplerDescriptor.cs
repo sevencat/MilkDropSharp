@@ -9,8 +9,8 @@ namespace MilkDrop.ProjectM.Renderer;
 /// <remarks>
 /// <para>对应 <c>Renderer/TextureSamplerDescriptor.hpp:25-114</c> 与 <c>.cpp:10-154</c>。</para>
 /// <para>
-/// C++ 用 <c>weak_ptr</c> 存纹理，好让纹理管理器淘汰纹理后自动失效；C# 侧暂时直接持有引用，
-/// <c>TryUpdate(TextureManager&amp;)</c> 等 P7 移植 <c>TextureManager</c> 时再补。
+/// 纹理用 <see cref="WeakReference{T}"/> 弱引用保存（C++ 的 <c>weak_ptr</c>）：纹理管理器淘汰纹理后
+/// 描述符会自动失效，再由 <see cref="TryUpdate"/> 按名字重新取一次。
 /// </para>
 /// </remarks>
 public sealed class TextureSamplerDescriptor
@@ -27,14 +27,29 @@ public sealed class TextureSamplerDescriptor
     /// <param name="sizeName">texsize uniform 名，例如 <c>mytex</c>。</param>
     public TextureSamplerDescriptor(Texture? texture, Sampler? sampler, string samplerName, string sizeName)
     {
-        Texture = texture;
         Sampler = sampler;
         SamplerName = samplerName;
         SizeName = sizeName;
+
+        if (texture is not null)
+        {
+            Texture = texture;
+        }
     }
 
+    private WeakReference<Texture>? _textureReference;
+
     /// <summary>纹理（可能为 null / 空）。</summary>
-    public Texture? Texture { get; set; }
+    public Texture? Texture
+    {
+        get => _textureReference is not null && _textureReference.TryGetTarget(out Texture? texture)
+            ? texture
+            : null;
+        set => _textureReference = value is null ? null : new WeakReference<Texture>(value);
+    }
+
+    /// <summary>是否已经尝试过重新解析但失败了（可以放弃）。</summary>
+    public bool UpdateFailed { get; private set; }
 
     /// <summary>采样器。</summary>
     public Sampler? Sampler { get; set; }
@@ -47,6 +62,31 @@ public sealed class TextureSamplerDescriptor
 
     /// <summary>纹理与采样器都无效。</summary>
     public bool Empty() => Texture is null || Texture.Empty;
+
+    /// <summary>
+    /// 描述符失效时（纹理被淘汰或管理器重建）按名字重新取一次
+    /// （对应 <c>TextureSamplerDescriptor::TryUpdate</c>）。
+    /// </summary>
+    public void TryUpdate(TextureManager textureManager)
+    {
+        ArgumentNullException.ThrowIfNull(textureManager);
+
+        if (!Empty())
+        {
+            return;
+        }
+
+        TextureSamplerDescriptor descriptor = textureManager.GetTexture(SamplerName);
+        if (descriptor.Empty())
+        {
+            // 只试一次，之后放弃。
+            UpdateFailed = true;
+            return;
+        }
+
+        Texture = descriptor.Texture;
+        Sampler = descriptor.Sampler;
+    }
 
     /// <summary>把纹理 + 采样器绑到指定单元，并写入 <c>sampler_*</c>/<c>texsize_*</c> uniform。</summary>
     /// <param name="unit">纹理单元。</param>

@@ -164,11 +164,11 @@
 | **P1** 纯数据层 ✅ | Audio 全套（Pcm/MilkdropFft/Loudness/WaveformAligner/FrameAudioData）、TimeKeeper、Utils、RenderContext、PresetFileParser | **已完成**：52 个单测全绿；FFT 与 double 精度朴素 DFT 交叉验证；语料测试 9795 个预设全部解析、0 失败。`PresetState`/`PresetFactory` 因持有 GL 对象推迟到 P2 | 3–4 天 |
 | **P2** GL 封装层 ✅ | Texture/TextureAttachment/Framebuffer(MRT)/Shader/Sampler/RenderItem/CopyTexture/FileScanner/TextureSamplerDescriptor + `GlContext` 静态入口 | **已完成**：离屏 pbuffer 上下文里 8 个像素回读测试全绿（RGBA8 清屏回读、RGBA8+RG16F MRT 双附件、CopyTexture 垂直翻转、MaskDrawBuffer、shader 编译错误、FileScanner） | 3–5 天 |
 | **P3** 着色器装配 ✅ | `MilkdropShader`（预处理/采样器注入/转译）+ `GetReferencedSamplers` + blur 级别判定 + `MilkdropStaticShaders`（预设头 + 两个预设顶点着色器） | **已完成**：语料 15895 个 warp/comp 着色器，15759 编译通过，成功率 **99.14%**（目标 ≥95%），失败归类见 `projectMIssue.md` I-23；`LoadVariables`/从 `PresetState` 取纹理留到 P4 | 3–4 天 |
-| **P4** 主渲染管线 🚧 | 已完成：`PresetState`（数据/代码解析）、`PerFrameContext`、`BlurTexture`、`TextureManager`（含 `MilkdropNoise`/idle 纹理）、`PerPixelContext`、`PerPixelMesh`（网格生成 + 逐顶点求值 + 默认 warp 管线）；待做：预设 warp shader（`MilkdropShader.LoadVariables`+按 `PresetState` 取描述符）/ motion vectors / darken center / border / final composite（含 VideoEcho+Filters 回退） | 单预设（无音频、固定时间）出图；与 `projectMSDL.exe` 同预设截图目视比对通过 | 5–7 天 |
-| **P5** 波形与形状 | 12 种波形 + WaveformMath、CustomWaveform、CustomShape 及三个 per-* 上下文 | 含 shape/waveform 的代表性预设画面正确 | 4–5 天 |
-| **P6** 音频 + 切换 | WASAPI → `PCM`、节拍硬切、TimeKeeper 软切、`PresetTransition` + 6 个内置过渡、`IdlePreset`（3 张内嵌图） | 连续播放 30 分钟无崩溃；自动/手动切换有过渡动画 | 3–4 天 |
-| **P7** 纹理管理 | `TextureManager`（扫描/`randNN_`/wrap-filter 前缀/age 淘汰）、`MilkdropNoise`（3D 纹理） | 预设里的 `sampler_rand*`/`sampler_noisevol_*` 生效 | 2–3 天 |
-| **P8** 应用层 | AppOptions、快捷键、预设浏览/搜索 UI、参数面板（beat sensitivity / preset duration / blend / mesh size / aspect）、FPS 统计、截图、playlist 文件 | UI 可完整操作；`--smoke` 式无人值守跑通 | 3–5 天 |
+| **P4** 主渲染管线 ✅ | `PresetState`、`PerFrameContext`、`BlurTexture`、`TextureManager`（含 `MilkdropNoise`/idle 纹理）、`PerPixelContext`、`PerPixelMesh`、预设 warp shader、`MotionVectors`、`DarkenCenter`、`Border`、`FinalComposite`（含 `VideoEcho` + `Filters` 回退）、`CopyTexture` 两次 Y 翻转、`MilkdropPreset` 完整生命周期（构造/`Initialize`/`RenderFrame`/`OutputTexture`/`DrawInitialImage`/`PerFrameUpdate`） | **已完成**：离屏 32×24 里 5 个管线测试全绿（comp shader 输出定值颜色、无 comp 走 VideoEcho、motion vectors、尺寸变化重建、GL error 0）。与原生 A/B 截图待 P9 批量比对 | 5–7 天 |
+| **P5** 波形与形状 ✅ | 16 种波形（12 种原生 + 4 个 Milkdrop2077 追加）+ `WaveformMath`（IIR 平滑/雅可比平滑/边缘裁剪）、`CustomWaveform`、`CustomShape`（贴图/渐变两套 VAO + 描边）及三个 per-* 上下文 | **已完成**：16 种模式顶点测试 + 自定义形状/波形出图测试全绿；`IdlePreset` 里的 shape/wave 代码可正常求值 | 4–5 天 |
+| **P6** 音频 + 切换 ✅ | Audio 全套（P1 已完成）、`TimeKeeper`、`PresetTransition` + `TransitionShaderManager`（6 个内置过渡，GLES 精度头）、`IdlePreset` | **已完成**：6 个转场着色器全部编译通过；转场 quad 绘制 + 待机预设连续两帧渲染 GL error 0。WASAPI 采集与 30 分钟长跑属 P8/P9 | 3–4 天 |
+| **P7** 纹理管理 ✅ | `TextureManager`（扫描/`randNN_`/wrap-filter 前缀/age 淘汰）、`MilkdropNoise`（3D 纹理）、`TextureSamplerDescriptor.TryUpdate` + 弱引用语义 | **已完成**：描述符失效后可按名字重取（占位纹理回退与原生一致），测试覆盖三条分支 | 2–3 天 |
+| **P8** 应用层 ✅ | `ProjectMEngine`（对应 `ProjectM.cpp`：工厂/纹理/转场/音频/参数/事件）、`Preset`+`PresetFactory`+`PresetFactoryManager`、`MilkdropPresetFactory`、`Playlist`/`Item`/`Filter`；App 层：`AppOptions`（30+ 参数）、快捷键（Space/N/P/R/L/S/F/H/Esc）、预设浏览/搜索 UI、参数面板、FPS 统计、PNG 截图、文本 playlist、WASAPI 环回采集（NAudio，无设备时静音降级） | **已完成**：`--smoke` 待机预设 120 帧 120 FPS、GL error 0；UI 构建 + 截图验证；Engine 7 项测试 + Playlist/Filter 20 项测试全绿 | 3–5 天 |
 | **P9** 验证打磨 | 9795 预设 × N 帧批量跑；GL error/崩溃/编译失败清单；与原生 A/B 截图 | 崩溃率 0、GL error 0；失败清单收敛并归档 | 3–5 天 |
 
 合计约 **30–44 人日**。
@@ -199,6 +199,32 @@
 2. **数值 golden**：Audio 链路（FFT/Loudness/Aligner）用固定 PCM 输入与 C++ 输出对比；gl 层用像素回读对比。
 3. **A/B 截图**：同预设、同帧号、同网格尺寸下与 `projectMSDL.exe` 截图比对（参考 `HlslParser.Tests` 的 golden 组织方式）。
 4. **无人值守 smoke**：`--smoke N` 随机抽预设跑固定帧数，退出码反映是否有 GL error/崩溃/编译失败。
+
+### 一键复跑（P8/P9）
+
+```bat
+:: 单元测试（194 项，含离屏 GL 管线）
+dotnet test tests/MilkDrop.ProjectM.Tests
+
+:: 界面 + 字体覆盖检查（缺字返回 1）
+dotnet run --project src/MilkDrop.ProjectM.App -- --font-check
+
+:: 无人值守渲染 + 截图（3 秒自检 + 末帧 PNG）
+dotnet run --project src/MilkDrop.ProjectM.App -- --smoke 240 --no-ui ^
+  --shot artifacts/p8/idle.png
+
+:: P9 批量验证（9795 个预设 × 10 帧，CSV 每 200 条增量落盘）
+dotnet run --project src/MilkDrop.ProjectM.App -- --bench --bench-frames 10 ^
+  --width 640 --height 480 --no-audio --bench-report artifacts/p9/bench-all.csv ^
+  --preset-dir res\projectMSDL-2.0.0-win64\presets\presets-cream-of-the-crop
+
+:: 分段跑（每个进程约 2000 个，避免一次跑太久）
+... --bench --bench-skip 2000 --bench-limit 2000 --bench-report artifacts/p9/bench-2000-4000.csv
+```
+
+CSV 列：`index,file,loaded,frames,gl_error,load_ms,mean_luminance,non_black_ratio,error,screenshot`。
+判定口径：`loaded=0`（含表达式/着色器编译失败）与 `gl_error!=0` 记为失败；
+`non_black_ratio` 仅作信息列（`! Transition` 这类预设本来就是过渡到黑）。
 
 ---
 

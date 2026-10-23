@@ -1,5 +1,6 @@
 using MilkDrop.ProjectM.Audio;
 using MilkDrop.ProjectM.Renderer;
+using MilkDrop.ProjectM.Rendering;
 
 namespace MilkDrop.ProjectM.MilkdropPreset;
 
@@ -12,14 +13,18 @@ namespace MilkDrop.ProjectM.MilkdropPreset;
 /// 与 C++ 的差异（随 P4 渲染管线逐步补齐）：
 /// </para>
 /// <list type="bullet">
-/// <item>GL 相关成员 <c>untexturedShader</c>/<c>texturedShader</c>/<c>mainTexture</c>/<c>blurTexture</c>
-/// 还没进来——它们要等静态着色器全集与 <c>BlurTexture</c>（P4）。</item>
+/// <item><c>mainTexture</c>/<c>blurTexture</c> 已可用：前者是外部设置的引用，后者惰性创建
+/// GL 资源；<c>untexturedShader</c>/<c>texturedShader</c>（P4 边框/暗角/视频回声用）同样惰性创建。</item>
 /// <item>C++ 每个预设各有一个 gmegabuf（<c>globalMemory</c>）；<c>MilkDrop.Eval</c> 的
 /// <c>CompileContext.GlobalMemory</c> 是进程级静态，多个预设共用一份（见 projectMIssue.md）。</item>
 /// </list>
 /// </remarks>
-public sealed class PresetState
+public sealed class PresetState : IDisposable
 {
+    private BlurTexture? _blurTexture;
+    private Renderer.Shader? _untexturedShader;
+    private Renderer.Shader? _texturedShader;
+
     /// <summary>正交投影矩阵（列主序，直接喂 <c>glUniformMatrix4fv</c>）：<c>glm::ortho(-1, 1, 1, -1, -40, 40)</c>。</summary>
     public static readonly float[] OrthogonalProjection =
     [
@@ -187,6 +192,67 @@ public sealed class PresetState
     /// 保证同一预设里两边拿到同一张纹理。
     /// </summary>
     public SortedDictionary<int, TextureSamplerDescriptor> RandomTextureDescriptors { get; } = new();
+
+    /// <summary>
+    /// 主纹理（C++ 的 <c>mainTexture</c> <c>weak_ptr</c>）：warp 阶段的输入，由预设管理器在
+    /// 拿到 framebuffer 附件后设置。
+    /// </summary>
+    public Texture? MainTexture { get; set; }
+
+    /// <summary>
+    /// 主纹理的模糊链（对应 C++ 的 <c>blurTexture</c> 值成员）。
+    /// 第一次访问时才创建 GL 资源，避免无上下文的纯数据测试被迫初始化 GL。
+    /// </summary>
+    public BlurTexture BlurTexture => _blurTexture ??= new BlurTexture();
+
+    /// <summary>
+    /// 画不带纹理的图元（边框、暗角中心）的着色器（对应 C++ 的 <c>untexturedShader</c>）。
+    /// 第一次访问时才编译，避免纯数据测试被迫初始化 GL。
+    /// </summary>
+    public Renderer.Shader UntexturedShader => _untexturedShader ??= CreateUntexturedShader();
+
+    /// <summary>
+    /// 画带纹理的图元（视频回声、纹理化形状）的着色器（对应 C++ 的 <c>texturedShader</c>）。
+    /// </summary>
+    public Renderer.Shader TexturedShader => _texturedShader ??= CreateTexturedShader();
+
+    /// <summary>释放惰性创建的 GL 资源（模糊链与两个通用着色器）。</summary>
+    public void Dispose()
+    {
+        _blurTexture?.Dispose();
+        _blurTexture = null;
+
+        if (GlContext.IsInitialized)
+        {
+            _untexturedShader?.Dispose();
+            _texturedShader?.Dispose();
+        }
+
+        _untexturedShader = null;
+        _texturedShader = null;
+    }
+
+    /// <remarks>对应 <c>PresetState.cpp:19-23</c>。</remarks>
+    private static Renderer.Shader CreateUntexturedShader()
+    {
+        MilkdropStaticShaders staticShaders = MilkdropStaticShaders.Get();
+
+        var shader = new Renderer.Shader();
+        shader.CompileProgram(staticShaders.GetUntexturedDrawVertexShader(),
+                              staticShaders.GetUntexturedDrawFragmentShader());
+        return shader;
+    }
+
+    /// <remarks>对应 <c>PresetState.cpp:22-23</c>。</remarks>
+    private static Renderer.Shader CreateTexturedShader()
+    {
+        MilkdropStaticShaders staticShaders = MilkdropStaticShaders.Get();
+
+        var shader = new Renderer.Shader();
+        shader.CompileProgram(staticShaders.GetTexturedDrawVertexShader(),
+                              staticShaders.GetTexturedDrawFragmentShader());
+        return shader;
+    }
 
     /// <summary>从预设文件里载入初值与代码（对应 <c>PresetState::Initialize</c>）。</summary>
     /// <param name="parsedFile">已解析好的预设文件。</param>

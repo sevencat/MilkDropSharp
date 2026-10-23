@@ -252,8 +252,11 @@ public sealed unsafe class ImguiGles3Renderer : IDisposable
         _gl.TexParameter(GLEnum.Texture2D, GLEnum.TextureMagFilter, (int)GLEnum.Linear);
         _gl.TexParameter(GLEnum.Texture2D, GLEnum.TextureWrapS, (int)GLEnum.ClampToEdge);
         _gl.TexParameter(GLEnum.Texture2D, GLEnum.TextureWrapT, (int)GLEnum.ClampToEdge);
-        _gl.PixelStore(GLEnum.UnpackRowLength, 1);
-        _gl.TexImage2D(GLEnum.Texture2D, 0, (int)GLEnum.Rgba, (uint)width, (uint)height, 0,
+        // 图集是紧密排列的 RGBA8。这里必须是 UnpackAlignment=1；
+        // 曾经误写成 UnpackRowLength=1（每行只算 1 个像素），导致字形纹理整体错位、文字变成碎斜线。
+        _gl.PixelStore(GLEnum.UnpackAlignment, 1);
+        _gl.PixelStore(GLEnum.UnpackRowLength, 0);
+        _gl.TexImage2D(GLEnum.Texture2D, 0, (int)GLEnum.Rgba8, (uint)width, (uint)height, 0,
             GLEnum.Rgba, GLEnum.UnsignedByte, pixels);
         _gl.BindTexture(GLEnum.Texture2D, 0);
 
