@@ -1,0 +1,12 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+shot*.bmp
+shot*.png
+app.out.txt
+app.err.txt
+TestResults/
+imgui.ini
+.idea

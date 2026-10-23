@@ -3,9 +3,9 @@ namespace MilkDrop.Classic.App;
 /// <summary>命令行参数。</summary>
 public sealed class AppOptions
 {
-    public int Width { get; private set; } = 1280;
+    public int Width { get; private set; } = 1024;
 
-    public int Height { get; private set; } = 720;
+    public int Height { get; private set; } = 768;
 
     /// <summary>用户显式指定过宽/高（此时不再按 DPI 放大窗口）。</summary>
     public bool HasExplicitSize { get; private set; }
@@ -50,7 +50,7 @@ public sealed class AppOptions
     /// 默认关：与原版一致 —— 这些 shader 编译失败并回退默认 shader。
     /// 别名 <c>--fix-macro-shadowing</c>（旧参数名）仍然有效。
     /// </summary>
-    public bool ShaderCompat { get; private set; }
+    public bool ShaderCompat { get; private set; } = true;
 
     /// <summary>
     /// <c>--preset-duration &lt;秒&gt;</c>：自动换预设的平均间隔（默认 16，另有 0..10 秒随机抖动）。
