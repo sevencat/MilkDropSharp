@@ -10,3 +10,5 @@ app.err.txt
 TestResults/
 imgui.ini
 .idea
+/forai.md
+/refcode
