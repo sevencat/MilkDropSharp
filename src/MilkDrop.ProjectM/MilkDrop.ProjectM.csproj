@@ -18,6 +18,8 @@
     <EmbeddedResource Include="MilkdropPreset\Shaders\*.inc" />
     <EmbeddedResource Include="MilkdropPreset\Shaders\*.vert" />
     <EmbeddedResource Include="MilkdropPreset\Shaders\*.frag" />
+    <!-- idle 预设用的两张纹理（C++ 侧是 IdleTextures.hpp 里的 32 位 TGA 字节数组） -->
+    <EmbeddedResource Include="IdleTextures\*.tga" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="MilkDrop.ProjectM.Tests" />
