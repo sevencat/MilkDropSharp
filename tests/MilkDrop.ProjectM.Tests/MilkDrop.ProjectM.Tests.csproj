@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>MilkDrop.ProjectM.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MilkDrop.ProjectM\MilkDrop.ProjectM.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 离屏 GL 测试需要 ANGLE 原生库（与 App 相同的来源，见 App.csproj 的注释） -->
+    <PackageReference Include="Avalonia.Angle.Windows.Natives" Version="2.1.27548.20260419"
+                     GeneratePathProperty="true" ExcludeAssets="all" />
+    <Content Include="$(PkgAvalonia_Angle_Windows_Natives)\runtimes\win-x64\native\*.dll"
+             Link="%(Filename)%(Extension)" CopyToOutputDirectory="Always" Visible="false" />
+  </ItemGroup>
+</Project>

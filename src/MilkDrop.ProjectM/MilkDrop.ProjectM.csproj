@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>MilkDrop.ProjectM</RootNamespace>
+    <AssemblyName>MilkDrop.ProjectM</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- ANGLE（OpenGL ES 3.0）绑定；EGL 由本库 Rendering/Egl.cs 自行 P/Invoke（Silk.NET.OpenGLES 不含 EGL 绑定） -->
+    <PackageReference Include="Silk.NET.OpenGLES" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MilkDrop.Eval\MilkDrop.Eval.csproj" />
+    <ProjectReference Include="..\HlslParser\HlslParser.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 静态 GLSL 着色器（C++ 侧由 GenerateStaticShaders.cmake 在构建期读成字符串常量） -->
+    <EmbeddedResource Include="MilkdropPreset\Shaders\*.inc" />
+    <EmbeddedResource Include="MilkdropPreset\Shaders\*.vert" />
+    <EmbeddedResource Include="MilkdropPreset\Shaders\*.frag" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="MilkDrop.ProjectM.Tests" />
+  </ItemGroup>
+</Project>
