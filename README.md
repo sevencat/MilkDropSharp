@@ -1,255 +1,297 @@
 <div align="center">
   <img src="milkdropsharp.png" width="140" alt="MilkDropSharp" />
   <h1>MilkDropSharp</h1>
-  <p>两个 C++ 音乐可视化引擎的 .NET 托管移植：<b>projectM 4.1.8</b> 与 <b>MilkDrop3</b>（Windows x64）</p>
-  <p><sub>AI「许愿式」生成 · 仅供学习与折腾，生产慎用</sub></p>
+  <p>.NET managed ports of two C++ music visualizers: <b>projectM 4.1.8</b> and <b>MilkDrop3</b> (Windows x64)</p>
+  <p><sub>Vibe-coded with AI · for learning and tinkering only, not for production</sub></p>
+  <p><b>English</b> · <a href="README.cn.md">简体中文</a></p>
 </div>
 
 ---
 
 > [!WARNING]
-> **本项目是 AI「许愿式」生成的产物。**
+> **This project is a "vibe-coded", AI-generated artifact.**
 >
-> 绝大部分代码由大语言模型按自然语言描述（"把它移植过来""这里跑不动""加一个全屏"）直接生成，
-> 人类只负责提需求、跑验收、指出哪里不对。因此：
+> Almost all of the code was produced by a large language model from plain-language wishes
+> ("port this thing over", "it doesn't run here", "add a fullscreen mode"). A human only wrote
+> the requirements, ran the acceptance checks, and pointed at whatever was broken. Consequently:
 >
-> - 架构与代码风格是"能跑就对"的产物，**并非**按工业级标准设计，同一个模块里可能并存几套写法；
-> - 除仓库里的单元测试与逐像素 A/B 对比之外**没有长期生产验证**，边界情况大概率没覆盖到；
-> - 注释、文档、提交信息也多为 AI 生成，可能有过时或与代码不符之处（以代码为准）；
-> - 把它当"可运行的参考实现 / 学习材料 / 折腾玩具"是合适的，**直接上生产请自己做充分评估与加固**。
+> - The architecture and coding style are "it runs, therefore it's correct" — **not** designed to
+>   industrial standards. A single module may contain several inconsistent ways of doing the same thing.
+> - Apart from the unit tests and per-pixel A/B comparisons in this repo, there is **no long-term
+>   production validation**; edge cases are very likely uncovered.
+> - Comments, docs and commit messages are mostly AI-written too, and may be stale or disagree with
+>   the code (the code wins).
+> - It is fine as a runnable reference implementation / learning material / toy. **If you want to
+>   ship it, do your own thorough review and hardening first.**
 >
-> 移植正确性尽量用 9795 个真实预设 + 与原生 libprojectM 的截图对比来兜底，但覆盖不等于正确。
+> Correctness is propped up by running 9795 real presets and comparing screenshots against native
+> libprojectM — but coverage is not correctness.
 
-## 这是什么
+## What this is
 
-仓库里有**两条互相独立的移植线**，共用两个基础库（表达式引擎、HLSL 转译器）：
+The repo contains **two independent ports** that share two foundation libraries (an expression
+engine and an HLSL translator):
 
-| 移植线 | 对应上游 | 渲染 | 入口 |
+| Port | Upstream | Rendering | Entry point |
 |---|---|---|---|
-| **Classic** | MilkDrop3（Milkdrop2 插件语义） | Direct3D 9（Vortice）+ HLSL 汇编着色器 | `src/MilkDrop.Classic.App` |
-| **ProjectM** | libprojectM 4.1.8 + `frontend-sdl-cpp` | ANGLE → OpenGL ES 3.0（Silk.NET）+ HLSL→GLSL | `src/MilkDrop.ProjectM.App` |
+| **Classic** | MilkDrop3 (Milkdrop2 plugin semantics) | Direct3D 9 (Vortice) + HLSL assembly shaders | `src/MilkDrop.Classic.App` |
+| **ProjectM** | libprojectM 4.1.8 + `frontend-sdl-cpp` | ANGLE → OpenGL ES 3.0 (Silk.NET) + HLSL→GLSL | `src/MilkDrop.ProjectM.App` |
 
-两者都只跑在 **Windows x64**：Classic 依赖 D3D9，ProjectM 依赖 ANGLE 的 D3D11 后端，音频都走 WASAPI 环回。
+Both run on **Windows x64 only**: Classic is tied to D3D9, ProjectM is tied to ANGLE's D3D11
+backend, and both capture audio through WASAPI loopback.
 
-共用的两个库是从 C++ 原样移植过来的，`Classic` 和 `ProjectM` 都直接使用：
+The two shared libraries are direct ports of their C++ counterparts and are used by both ports:
 
-- **`src/MilkDrop.Eval`** — `projectm-eval` 移植。ns-eel 表达式解释执行（`regNN` 槽、megabuf、gmegabuf、全套内建函数），**无 `Reflection.Emit`**，因此 Native AOT 安全。
-- **`src/HlslParser`** — `hlslparser` 移植。把预设里的 HLSL 片段转成 GLSL（`Version330` / `Version300Es`），`tex2D`/`tex3D`/`register(...)` 都支持。
+- **`src/MilkDrop.Eval`** — port of `projectm-eval`. An ns-eel expression interpreter (`regNN`
+  slots, megabuf, gmegabuf, the full built-in function set) with **no `Reflection.Emit`**, so it is
+  Native AOT safe.
+- **`src/HlslParser`** — port of `hlslparser`. Translates the HLSL snippets inside presets into
+  GLSL (`Version330` / `Version300Es`); `tex2D` / `tex3D` / `register(...)` are all supported.
 
-## 状态
+## Status
 
-| 部分 | 状态 | 验证方式 |
+| Component | Status | How it was verified |
 |---|---|---|
-| `MilkDrop.Eval` | 完成 | 98 个测试（`tests/MilkDrop.Eval.Tests`） |
-| `HlslParser` | 完成 | 65 个测试 + `tests/golden` 里的 hlsl/glsl 对照用例 |
-| `MilkDrop.ProjectM` + App | 完成（P0–P10） | 9795 个预设全部跑通（加载失败 67 个，均为预设自身语法损坏）；126 个测试；AOT 产物与 JIT 版截图平均差 0.89/255 |
-| `MilkDrop.Classic.*` | 完成 | 187 个测试（`tests/MilkDrop.Classic.Tests`） |
+| `MilkDrop.Eval` | Done | 98 tests (`tests/MilkDrop.Eval.Tests`) |
+| `HlslParser` | Done | 65 tests + the hlsl/glsl golden cases under `tests/golden` |
+| `MilkDrop.ProjectM` + App | Done (P0–P10) | all 9795 presets run (67 fail to load, all due to broken preset files); 126 tests; AOT vs JIT screenshots differ by 0.89/255 on average |
+| `MilkDrop.Classic.*` | Done | 187 tests (`tests/MilkDrop.Classic.Tests`) |
 
-表中的"完成"指**按移植计划逐项跑通验收**（计划见 [`projectMPlan.md`](projectMPlan.md)），不代表代码质量、边界覆盖或性能达到生产标准——原因见上方声明。
+"Done" here means **every item in the port plan was implemented and accepted** (see
+[`projectMPlan.md`](projectMPlan.md)); it does not mean the code quality, edge-case coverage or
+performance is production grade — see the warning above.
 
-ProjectM 线与原生 `libprojectM` 做过逐帧耗时对比和 A/B 截图，数据见 [`projectMMisc.md`](projectMMisc.md)。
+The ProjectM port was benchmarked frame-by-frame against native `libprojectM`; numbers are in
+[`projectMMisc.md`](projectMMisc.md).
 
-## 环境要求
+## Requirements
 
 - Windows 10/11 **x64**
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)（`Directory.Build.props` 里 `TargetFramework=net10.0`；`HlslParser` 单独用 `net9.0`）
-- 显卡需支持 **D3D11**（ANGLE 后端）与 **D3D9**（Classic）
-- 只有做 Native AOT 时才需要 **VS 2022 Build Tools + "使用 C++ 的桌面开发"**（要有 `link.exe`）
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) (`TargetFramework=net10.0` in
+  `Directory.Build.props`; `HlslParser` alone targets `net9.0`)
+- A GPU with **D3D11** (ANGLE backend) and **D3D9** (Classic) support
+- **VS 2022 Build Tools with the "Desktop development with C++" workload** (i.e. `link.exe`) —
+  only needed for Native AOT
 
-## 快速开始
+## Quick start
 
-### ProjectM（GLES3 版）
+### ProjectM (the GLES3 port)
 
 ```powershell
-# 直接跑（预设目录必须显式给，或用 exe 旁的 presets 兜底）
+# Just run it (you must point at a preset directory, or drop a presets\ folder next to the exe)
 dotnet run --project src\MilkDrop.ProjectM.App -c Release -- ^
   --preset-dir "res\projectMSDL-2.0.0-win64\presets\presets-cream-of-the-crop"
 ```
 
-预设查找顺序：
+Preset lookup order:
 
-1. `--preset <文件>` 单个 `.milk`
-2. `--playlist <文件>`（每行一个路径，`#` 开头为注释）
-3. `--preset-dir <目录>`（**可重复，递归**扫描 `.milk`）
-4. 都没有时，退回到 **exe 同级的 `presets\` 目录**
+1. `--preset <file>` — a single `.milk`
+2. `--playlist <file>` — one path per line, `#` starts a comment
+3. `--preset-dir <dir>` — **repeatable, scanned recursively** for `.milk`
+4. If none of the above produced anything, fall back to the `presets\` folder **next to the exe**
 
-纹理同理：`--texture-dir` 可重复，否则用 exe 旁的 `textures\`。
+Textures work the same way: `--texture-dir` is repeatable, otherwise `textures\` next to the exe.
 
-常用参数：
+Common options:
 
 ```powershell
---width N --height N        窗口尺寸（默认 1024x768）
---fullscreen               启动即全屏（运行中 F11 切换）
---no-ui                    不建 ImGui 界面（纯画面，跑分用）
---novsync                  关闭垂直同步
---shuffle                  随机播放
---duration SEC --blend SEC 单预设时长（默认 30）/ 软切时长（默认 3）
---no-audio                 不采集系统音频（静音驱动）
---synthetic-audio          用合成测试音（有节拍，批量验证用）
---preset-dir DIR           见上
---smoke N                  渲染 N 帧后自动退出
---shot FILE                退出前存一张 PNG
---auto-next N              每 N 帧自动切下一个预设
---fixed-dt S               固定时间步长（可复现截图对比）
---bench [--bench-frames N] 批量跑全部预设并出 CSV 报告
+--width N --height N        window size (default 1024x768)
+--fullscreen               start fullscreen (toggle at runtime with F11)
+--no-ui                    don't create the ImGui UI (pure picture, for benchmarking)
+--novsync                  disable vsync
+--shuffle                  play presets in random order
+--duration SEC --blend SEC per-preset time (default 30) / soft-cut time (default 3)
+--no-audio                 don't capture system audio (silent driving signal)
+--synthetic-audio          use a synthetic test tone (with beats, for batch runs)
+--preset-dir DIR           see above
+--smoke N                  render N frames then exit
+--shot FILE                save the last frame as PNG before exiting
+--auto-next N              switch to the next preset every N frames
+--fixed-dt S               fixed timestep (for reproducible screenshot comparisons)
+--bench [--bench-frames N] batch-run every preset and emit a CSV report
 ```
 
-完整列表：`--help`。
+Full list: `--help`.
 
-### Classic（D3D9 版）
+### Classic (the D3D9 port)
 
 ```powershell
 dotnet run --project src\MilkDrop.Classic.App -c Release -- --preset random
 ```
 
-资源目录不需要配：程序会从当前目录向上找含 `res\MilkDrop3\plugins\Milkdrop2\data\include.fx` 的仓库根。
-找不到时用环境变量指定：
+No resource configuration needed: the app walks up from the current directory looking for the repo
+root that contains `res\MilkDrop3\plugins\Milkdrop2\data\include.fx`. If that fails, point at it
+explicitly:
 
 ```powershell
 $env:MILKDROP_CLASSIC_ROOT = "F:\path\to\MilkDropSharp"
 ```
 
-常用参数：
+Common options:
 
 ```powershell
---width N --height N       窗口尺寸（默认 1280x720）
---preset <名字|路径|random>
---preset-duration SEC      自动换预设的平均间隔（默认 16，另有 0..10 秒随机抖动）
---blend SEC                交叉时长（默认自动 2.7 / 手动 1.7；0 = 硬切）
---lock-preset              锁定当前预设
---audio loopback|none      音频来源（默认 WASAPI 环回）
---sprite <名字> [--sprite-code <EEL>]   挂一个 sprite 及其 init 代码
---shader-compat            打开着色器兼容层（宏名遮蔽 / double / 非有限字面量 / get_fft / ps_2_0 指令槽升级）
---reference                用 D3D9 reference 设备（软件光栅，调试用）
---smoke [秒]               跑指定秒数后退出（默认 3）
---shot FILE --shot-delay S 定时截图
---ui-scale F                UI 缩放（默认按 DPI 推断）
+--width N --height N       window size (default 1280x720)
+--preset <name|path|random>
+--preset-duration SEC      average auto-advance interval (default 16, plus 0..10 s of jitter)
+--blend SEC                crossfade time (auto 2.7 / manual 1.7 by default; 0 = hard cut)
+--lock-preset              lock the current preset
+--audio loopback|none      audio source (WASAPI loopback by default)
+--sprite <name> [--sprite-code <EEL>]   attach a sprite plus its init code
+--shader-compat            enable the shader compatibility layer (macro shadowing / double /
+                           non-finite literals / get_fft / ps_2_0 instruction slot upgrades)
+--reference                use the D3D9 reference device (software rasterizer, debugging)
+--smoke [seconds]          run for N seconds then exit (default 3)
+--shot FILE --shot-delay S take a timed screenshot
+--ui-scale F               UI scale (inferred from DPI by default)
 ```
 
-### 快捷键
+### Hotkeys
 
 | ProjectM | | Classic | |
 |---|---|---|---|
-| `Space` | 暂停/继续 | `N` / `P` | 下一个 / 上一个 |
-| `N` / `→` | 下一个 | `Space` | 随机 |
-| `P` / `←` | 上一个 | `L` | 锁定当前预设 |
-| `R` | 随机 | | |
-| `L` | 锁定当前预设 | | |
-| `S` | 截图 | | |
-| `F` | 显示/隐藏界面 | | |
-| `F11` | 全屏 / 窗口 | | |
-| `H` | 帮助 | | |
-| `Esc` / `Q` | 退出 | | |
+| `Space` | pause / resume | `N` / `P` | next / previous preset |
+| `N` / `→` | next preset | `Space` | random preset |
+| `P` / `←` | previous preset | `L` | lock current preset |
+| `R` | random preset | | |
+| `L` | lock current preset | | |
+| `S` | screenshot | | |
+| `F` | show / hide UI | | |
+| `F11` | fullscreen / windowed | | |
+| `H` | help | | |
+| `Esc` / `Q` | quit | | |
 
-## Native AOT 发布
+## Native AOT
 
-两个 App 都能提前编译成不依赖 .NET 运行时的单 exe（原生库仍需随行）。
+Both apps can be ahead-of-time compiled into a single exe that doesn't need the .NET runtime
+(the native libraries still have to ship alongside it).
 
 ### ProjectM
 
-AOT 属性是**条件式**的，日常 `dotnet build` 不受影响，只有显式传 `-p:PublishAot=true` 才启用：
+AOT here is **conditional**: a normal `dotnet build` is unaffected, and it only kicks in when you
+pass `-p:PublishAot=true` explicitly:
 
 ```powershell
-# 建议先清空输出目录，避免旧产物混进来（“发布包里没带 dll”最常见的原因）
+# Clear the output directory first — stale files from an earlier publish are the most common
+# reason people think "the dlls are missing from the package"
 Remove-Item -Recurse -Force artifacts\p10\aot -ErrorAction SilentlyContinue
 
 dotnet publish src\MilkDrop.ProjectM.App -c Release -r win-x64 -p:PublishAot=true -o artifacts\p10\aot
 Remove-Item artifacts\p10\aot\*.pdb
 ```
 
-产物（约 11 MB）：
+Output (about 11 MB):
 
 ```
-MilkDrop.ProjectM.App.exe   4.5 MB   真 AOT 本机代码
-av_libglesv2.dll            5.1 MB   ANGLE（GLES3 → D3D11）
-cimgui.dll                  1.2 MB   Dear ImGui 原生绑定
-glfw3.dll                   0.2 MB   窗口 / 输入
+MilkDrop.ProjectM.App.exe   4.5 MB   real AOT native code
+av_libglesv2.dll            5.1 MB   ANGLE (GLES3 → D3D11)
+cimgui.dll                  1.2 MB   Dear ImGui native bindings
+glfw3.dll                   0.2 MB   windowing / input
 ```
 
-冷启动 0.46s（JIT 版 0.71s）。**已知限制**：NAudio 的 WASAPI 在 AOT 下不可用（`MMDeviceEnumeratorComObject..ctor()` 编译成必定抛异常的桩），音频自动降级为静音，画面照常渲染；需要声音时用 JIT 版或 `--synthetic-audio`。
+Cold start is 0.46 s (0.71 s for the JIT build). **Known limitation**: NAudio's WASAPI does not
+work under AOT (`MMDeviceEnumeratorComObject..ctor()` is compiled into a stub that always throws),
+so audio silently degrades to a static signal while rendering continues normally. Use the JIT build
+or `--synthetic-audio` if you need sound.
 
 ### Classic
 
-`MilkDrop.Classic.App.csproj` 里已经打开 `PublishAot` 与 `RuntimeIdentifiers=win-x64`，直接发布即可：
+`MilkDrop.Classic.App.csproj` already enables `PublishAot` and `RuntimeIdentifiers=win-x64`, so a
+plain publish is enough:
 
 ```powershell
 dotnet publish src\MilkDrop.Classic.App -c Release -r win-x64
 ```
 
-## 测试
+## Tests
 
 ```powershell
-dotnet test MilkDrop.ProjectM.sln      # ProjectM + Eval 线
-dotnet test MilkDrop.Classic.sln       # Classic + Eval 线
-dotnet test HlslParser.sln             # HLSL 转译器（含 golden 文件对照）
+dotnet test MilkDrop.ProjectM.sln      # ProjectM + Eval
+dotnet test MilkDrop.Classic.sln       # Classic + Eval
+dotnet test HlslParser.sln             # HLSL translator (including golden-file comparisons)
 ```
 
-部分渲染测试会建**离屏 GL 上下文（32×24）**并真实执行着色器，所以需要一块能跑 GLES3 的显卡，纯 CI 无显卡环境不适用。
+Some rendering tests create an **offscreen GL context (32×24)** and actually execute shaders, so
+they need a GPU capable of GLES3; a GPU-less CI box won't do.
 
-## 资源与语料
+## Assets and corpus
 
-仓库里的 `res/` 只用于运行与回归测试，不属于源码：
+`res/` exists only so the apps and regression tests have something to run on; it is not source code:
 
-| 路径 | 内容 |
+| Path | Contents |
 |---|---|
-| `res/projectMSDL-2.0.0-win64/` | projectM 官方 Windows 发行版：**9795 个 `.milk`**（`presets/presets-cream-of-the-crop`）、66 张纹理；其中的 `projectMSDL.exe` / `projectM-4.dll` 是 A/B 对比的“标尺” |
-| `res/MilkDrop3/plugins/Milkdrop2/` | MilkDrop3 插件资源：477 个预设、129 张纹理、31 个 `.shape`、19 个 `.wave`、82 张 sprite、`data/include.fx` |
+| `res/projectMSDL-2.0.0-win64/` | Official projectM Windows release: **9795 `.milk` presets** (`presets/presets-cream-of-the-crop`) and 66 textures; its `projectMSDL.exe` / `projectM-4.dll` serve as the baseline for A/B comparisons |
+| `res/MilkDrop3/plugins/Milkdrop2/` | MilkDrop3 plugin assets: 477 presets, 129 textures, 31 `.shape`, 19 `.wave`, 82 sprite images, `data/include.fx` |
 
-## 性能概览
+## Performance at a glance
 
-C# 版（Release JIT，ANGLE/GLES3）与原生 libprojectM 4 的逐帧耗时对比，mesh 32×24、静音、无 UI、关 vsync，单位 ms/帧：
+Frame times of the C# port (Release JIT, ANGLE/GLES3) versus native libprojectM 4 — mesh 32×24,
+silent, no UI, vsync off, in ms/frame:
 
-| 分辨率 | 原生（无同步） | C#（`--smoke`，真实循环） |
+| Resolution | Native (unsynced) | C# (`--smoke`, real loop) |
 |---|---|---|
-| 640×480 | 1.55 | 3.73（268 FPS） |
-| 1280×720 | 1.48–1.54 | 3.65（274 FPS） |
-| 1920×1080 | 1.47–1.51 | 3.70（270 FPS） |
+| 640×480 | 1.55 | 3.73 (268 FPS) |
+| 1280×720 | 1.48–1.54 | 3.65 (274 FPS) |
+| 1920×1080 | 1.47–1.51 | 3.70 (270 FPS) |
 
-几点实测结论：
+What the measurements showed:
 
-- 耗时基本与分辨率无关，**瓶颈在 CPU 侧**（每帧几十次 GL 状态切换 + 逐顶点 EEL 求值）。
-- 少数预设会慢得多，原因是**自定义形状实例数**（例如 3584 个 shape 实例/帧 → 单帧 17 ms），不是填充率问题。
-- 高分辨率下（如 2560×1600 全屏）会转为**填充率瓶颈**：warp shader 每像素多次纹理采样，约 66 FPS。
+- Frame time is essentially independent of resolution: the **bottleneck is on the CPU side**
+  (dozens of GL state changes plus per-vertex EEL evaluation every frame).
+- A few presets are much slower because of their **custom shape instance count** (e.g. 3584 shape
+  instances per frame → 17 ms per frame), not because of fill rate.
+- At high resolutions (e.g. 2560×1600 fullscreen) it flips to a **fill-rate** bottleneck: the warp
+  shader samples textures several times per pixel, landing around 66 FPS.
 
-完整数据、测量脚本说明与加载耗时对比见 [`projectMMisc.md`](projectMMisc.md)。
+Full numbers, the measurement scripts and preset-loading comparisons are in
+[`projectMMisc.md`](projectMMisc.md) (Chinese).
 
-## 仓库结构
+## Repository layout
 
 ```
 src/
-  MilkDrop.Eval/              projectm-eval 移植（EEL 解释器、megabuf）
-  HlslParser/                 hlslparser 移植（HLSL → GLSL 330 / 300es）
-  MilkDrop.Classic.Render.D3D9/   D3D9 后端（Vortice、HLSL 汇编、ImGui DX9）
-  MilkDrop.Classic.Visualizer/    MilkDrop3 预设语义（Visualizer/PresetState/WarpMesh/Sprite…）
-  MilkDrop.Classic.App/           命令行 + 窗口 + UI
-  MilkDrop.ProjectM/          libprojectM 移植（Renderer/MilkdropPreset/Audio…）
-  MilkDrop.ProjectM.App/          命令行 + 窗口 + UI
+  MilkDrop.Eval/              projectm-eval port (EEL interpreter, megabuf)
+  HlslParser/                 hlslparser port (HLSL → GLSL 330 / 300es)
+  MilkDrop.Classic.Render.D3D9/   D3D9 backend (Vortice, HLSL assembly, ImGui DX9)
+  MilkDrop.Classic.Visualizer/    MilkDrop3 preset semantics (Visualizer/PresetState/WarpMesh/Sprite…)
+  MilkDrop.Classic.App/           command line + window + UI
+  MilkDrop.ProjectM/          libprojectM port (Renderer/MilkdropPreset/Audio…)
+  MilkDrop.ProjectM.App/          command line + window + UI
 tests/
   MilkDrop.Eval.Tests/  HlslParser.Tests/  MilkDrop.Classic.Tests/  MilkDrop.ProjectM.Tests/
-  golden/                     HLSL→GLSL 的输入/期望输出对照
-res/                          预设、纹理、上游发行版（见上）
+  golden/                     HLSL→GLSL input/expected-output pairs
+res/                          presets, textures, upstream releases (see above)
 MilkDrop.ProjectM.sln  MilkDrop.Classic.sln  HlslParser.sln
 ```
 
-## 文档
+## Documentation
 
-| 文件 | 内容 |
+| File | Contents |
 |---|---|
-| [`projectMPlan.md`](projectMPlan.md) | ProjectM 移植计划：目标、C++→C# 代码映射表、P0–P10 阶段拆分与验收 |
-| [`projectMIssue.md`](projectMIssue.md) | 踩坑记录（ANGLE x64/EGL 入口、MRT、着色器转译、AOT…），按阶段编号 |
-| [`projectMMisc.md`](projectMMisc.md) | 性能实测、语义笔记、测量脚本用法、待办 |
+| [`projectMPlan.md`](projectMPlan.md) | ProjectM port plan: goals, the C++→C# mapping tables, the P0–P10 breakdown and acceptance criteria |
+| [`projectMIssue.md`](projectMIssue.md) | Pitfall log (ANGLE x64 / EGL entry points, MRT, shader translation, AOT…), numbered per phase |
+| [`projectMMisc.md`](projectMMisc.md) | Measured performance, semantics notes, measurement scripts, TODOs |
 
-## 已知限制
+> These docs are written in Chinese.
 
-- **仅 Windows x64**。Classic 绑死 D3D9；ProjectM 绑死 ANGLE 的 D3D11 后端与 WASAPI 环回。
-- ProjectM 线**不包含** projectM 的 C API 层、`ProjectMCWrapper`、SDL 前端；预设里的 user sprite 与歌曲标题动画未移植。
-- **ANGLE 用的是 Avalonia 构建的 `av_libglesv2.dll`**（真 x64，EGL 入口带 `EGL_` 前缀）。Silk.NET 自带的 ANGLE 原生包在 `runtimes/win-x64` 下是 x86 二进制，放到 x64 进程会 `BadImageFormatException`。
-- **AOT 版 ProjectM 无音频**（NAudio WASAPI 的 COM 类在 ILC 下无有效 IL），自动静音降级。
-- `--fullscreen` 时以显示器当前模式为准，`--width/--height` 不生效。
-- 9795 个预设里有 67 个（0.68%）加载失败，原因都是预设文件自身的语法/寄存器错误，与移植无关。
+## Known limitations
 
-## 许可证
+- **Windows x64 only.** Classic is hard-wired to D3D9; ProjectM is hard-wired to ANGLE's D3D11
+  backend and WASAPI loopback.
+- The ProjectM port **does not include** projectM's C API layer, `ProjectMCWrapper`, or the SDL
+  frontend; in-preset user sprites and the song-title animation were not ported.
+- **ANGLE comes from Avalonia's build of `av_libglesv2.dll`** (genuinely x64, with `EGL_`-prefixed
+  EGL entry points). The ANGLE native package shipped by Silk.NET is an x86 binary in
+  `runtimes/win-x64` and throws `BadImageFormatException` inside an x64 process.
+- **The AOT build of ProjectM has no audio** (NAudio's WASAPI COM class has no valid IL under ILC);
+  it degrades to silence automatically.
+- With `--fullscreen` the display's current mode wins; `--width` / `--height` are ignored.
+- 67 of the 9795 presets (0.68%) fail to load; all of them are broken preset files (syntax or
+  register errors), not porting issues.
 
-本仓库以 **GPL-3.0** 发布，见 [`LICENSE`](LICENSE)。
+## License
 
-移植自 [projectM](https://github.com/projectM-visualizer/projectm)（4.1.8）与 [MilkDrop3](https://github.com/MilkDrop2077/MilkDrop3)，上游项目各自的许可证与版权声明同样适用；分发时请一并遵守。
+This repository is released under **GPL-3.0**, see [`LICENSE`](LICENSE).
+
+Ported from [projectM](https://github.com/projectM-visualizer/projectm) (4.1.8) and
+[MilkDrop3](https://github.com/MilkDrop2077/MilkDrop3); the upstream projects' own licenses and
+copyright notices apply as well — comply with them when redistributing.

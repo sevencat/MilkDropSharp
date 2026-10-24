@@ -196,3 +196,43 @@ mesh 32×24 下原生仍是 1.5 ms 左右、我们 2.1–2.5 ms，差距主要�
 - 逐像素 A/B 与原生 `projectMSDL.exe` 的像素级比对仍未自动化（原生 exe 不支持指定预设文件），
   步骤见 `projectMPlan.md` 第 7 节。
 - `projectMPlan.md` D10 把 Q 变量扩到 64，全量语料里没人用 `q33+`，再扩需要改 bank 命名。
+- **亮度口径不一致（待查）**：同一预设 `p1.milk`、640×480、mesh 32×24、无音频、60 帧后，
+  我们的 `--bench` 报 `mean_luminance=0.114 / non_black_ratio=0.948`，
+  而原生探针 `glReadPixels` 读回只有 `lum=0.0016 / nonBlack=0.007`（落盘看原生画面确实是
+  "黑底 + 几片亮碎片"，所以原生侧数字可信）。
+  要么 `Benchmark.MeasureFrame` 读的缓冲 / 阈值跟 `glReadPixels` 不是一个口径，
+  要么两边无音频时的画面真有差异。**优先怀疑 `MeasureFrame`（先读它的实现）**，
+  因为差距有 70 倍，不像阈值能解释的。查清之前，别拿 bench 的亮度数字当正确性依据。
+- 顺带：原生探针的窗口要用 `WS_POPUP`（无边框），否则客户区小于渲染尺寸，`glReadPixels`
+  会读到边框外未定义区域，一开始我的读数全是 0。
+
+---
+
+## 4. `! Transition` 目录的预设为什么是黑的
+
+`res/projectMSDL-2.0.0-win64/presets/presets-cream-of-the-crop/! Transition` 下 4 个预设
+渲染出来全黑，**不是 bug，是设计如此**：它们是"过渡到黑场"用的转场预设。
+
+- 文件名都带 `transition to black`（快/慢两档）。
+- 内容几乎全是参数 + 内联 shader（`warp_1=\`shader_body`…` / `comp_2=\`shader_body`…`）：
+  没有 per_pixel 网格变形、没有 shape；自定义 wave 要么禁用（第 4 个 `wavecode_0_enabled=0`），
+  要么透明度约等于 0（第 1 个 `fWaveAlpha=0.001`）。
+- shader 逻辑就是"读上一帧 → 逐帧衰减"：
+
+  ```hlsl
+  ret = tex2D( sampler_main, uv ).xyz * .5;
+  ret -= 0.004;
+  ```
+
+  第 2、3 个是径向模糊版（4 次采样取均值再 `- 0.009`），第 1 个的 comp 是 `abs(crisp + blurry) * 32`。
+
+**实测**（同一预设 60–120 帧、无音频）：
+
+| | 原生 C++（`glReadPixels`） | 我们的 `--bench` |
+|---|---|---|
+| 4 个过渡预设 | lum 0 / 非黑 0 | lum 0 / 非黑 0 |
+| 对照 `p1.milk` | 0.0016 / 0.5% | 0.114 / 94.8% |
+
+两边一致，说明渲染管线没问题：输入（上一帧）是黑的，衰减出来还是黑的。
+在真实 MilkDrop 里它们只在"从别的预设切过来 + 有音乐"时才有画面可衰减。
+（对照组那两个数字本身的口径问题见第 3 节待办。）
