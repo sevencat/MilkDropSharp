@@ -27,6 +27,9 @@ namespace MilkDrop.ShaderToy.App;
 /// 转译 → 编译 → 画到 RGBA16F 离屏目标 → 拷到默认帧缓冲 → 叠 ImGui。
 /// 用法：<c>MilkDrop.ShaderToy.App [project.json] [--fixed-dt 0.0166] [--pause]</c>
 /// </remarks>
+// 整个 App 本来就只跑 Windows x64（EGL/ANGLE + win32 句柄 + winmm 音频），
+// 标注出来是为了让 CA1416 在调用 WaveOutAudioSink 时不再报警。
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 internal static class Program
 {
     private static EglContext? _context;

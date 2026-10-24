@@ -149,8 +149,10 @@ Release JIT、ANGLE/GLES3、mesh 32×24、静音、无 UI、关 vsync，单位 m
 - 2560×1600 全屏会翻转为**填充率瓶颈**：warp shader 每像素多次采样，约 66 FPS。
 
 另外，ProjectM App 可以 Native AOT 发布成不依赖 .NET 运行时的单 exe（约 11MB，冷启动 0.46s）。
-但有个硬限制：**NAudio 的 WASAPI 在 AOT 下不可用**（`MMDeviceEnumeratorComObject` 的构造被 ILC
-编成必定抛异常的桩），音频会自动降级成静音，画面照常。需要声音就用 JIT 版。
+音频这边踩过一个坑：NAudio 2.x 用经典 COM interop 激活 `MMDeviceEnumeratorComObject`，
+ILC 会把构造函数编成必定抛异常的桩，AOT 构建里直接哑掉，只能静音降级。
+NAudio 3 把 WASAPI 的消费接口换成了 `[GeneratedComInterface]` + `ComWrappers`，
+升级后 AOT 产物能正常采集 `WASAPI 环回 48000 Hz / 2 ch / 32 bit`，不再需要「AOT 静音」这种妥协。
 
 ---
 
@@ -171,7 +173,6 @@ Release JIT、ANGLE/GLES3、mesh 32×24、静音、无 UI、关 vsync，单位 m
 - **仅 Windows x64**：Classic 绑死 D3D9，ProjectM 绑死 ANGLE 的 D3D11 后端 + WASAPI 环回。
 - ProjectM 线**不包含** projectM 的 C API 层、`ProjectMCWrapper`、SDL 前端；
   预设里的 user sprite 与歌曲标题动画未移植。
-- AOT 版无音频。
 - `--fullscreen` 以显示器当前模式为准，`--width/--height` 不生效。
 
 ---

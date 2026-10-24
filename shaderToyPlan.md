@@ -32,7 +32,7 @@
 | 着色器 | `#version 300 es`，**不引入 glslang / SPIR-V** | ES3 原生支持 `sampler2D/Cube/3D`、`texture()`、`texelFetch`、`dFdx` |
 | 浮点目标 | `RGBA16F`（image/cube）、`RGBA32F`（buffer/sound） | 与上游 format 一致；需 `EXT_color_buffer_float` |
 | UI | **ImGui.NET**（`cimgui.dll` + 现有 `ImguiGles3Renderer`） | 已有完整 GLES3 后端，AOT 也已验证 |
-| 音频输出 | `NAudio`（JIT）+ `winmm.waveOut` P/Invoke（AOT 兜底） | NAudio 的 WASAPI 在 AOT 下不可用（已知坑，见 `projectMIssue.md`） |
+| 音频输出 | `NAudio.WinMM` 3.3.0（`WaveOut`，winmm 托管封装） | 纯 P/Invoke，AOT 实测可用（`projectMIssue.md` I-43 的 WASAPI 坑已随 NAudio 3 解决） |
 | FFT | **不复用** `MilkdropFft`，在 `MilkDrop.ShaderToy/Audio/MusicTexture.cs` 里自写 512 点 FFT | 原因见 `shaderToyIssue.md` S6-7：三线互不依赖，且 Shadertoy 要的是对数频率轴，projectM 的线性轴+均衡表本来就得重映射 |
 | JSON | `System.Text.Json` + **源生成**（`JsonSerializerContext`） | AOT 下不能用反射式序列化 |
 | 项目 | `src/MilkDrop.Rendering.Gles3/`（**P0 抽出的公共渲染库**）+ `src/MilkDrop.ShaderToy/`（库）+ `src/MilkDrop.ShaderToy.App/`（可执行）+ 独立 sln | 与 ProjectM 共用 GLES3 层，不复制第二份 |
@@ -212,7 +212,7 @@ MilkDrop.ShaderToy.sln
 - 渲染与播放：
   - 目标 `RGBA32F` 纹理 `512×2`（或 `1024×2`），一次跑出一批采样；`samp` 与 `time` 都通过 uniform 传入；
   - `glReadPixels` 回读 float，交错成 stereo → 环形缓冲 → 播放器。
-- 播放：`NAudio.Wave.WaveOutEvent`（JIT）；AOT 走 `winmm.waveOut`。缓冲 3~4 段 × 20ms，避免爆音。
+- 播放：`NAudio.Wave.WaveOut`（3.x 起 `WaveOutEvent` 改名为 `WaveOut`）。缓冲 3 段 × 20ms，避免爆音。
 - 音频自产的闭环：`sound` pass 的输出同时喂给 `music` 通道（可选开关），这样 image pass 能对它做可视化。
 - 外部音频（可选）：WASAPI 环回采集 → FFT → 音频纹理（`projectM` 线的 `AudioCapture` 已有，可复制）。
 - **验收**：

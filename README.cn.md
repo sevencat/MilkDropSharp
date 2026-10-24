@@ -197,7 +197,7 @@ cimgui.dll                  1.2 MB   Dear ImGui 原生绑定
 glfw3.dll                   0.2 MB   窗口 / 输入
 ```
 
-冷启动 0.46s（JIT 版 0.71s）。**已知限制**：NAudio 的 WASAPI 在 AOT 下不可用（`MMDeviceEnumeratorComObject..ctor()` 编译成必定抛异常的桩），音频自动降级为静音，画面照常渲染；需要声音时用 JIT 版或 `--synthetic-audio`。
+冷启动 0.46s（JIT 版 0.71s）。**AOT 下音频同样可用**：ProjectM / Classic 都已换到 NAudio 3 的 `WasapiRecorder`（WASAPI 的 COM 层改成 `[GeneratedComInterface]` + `ComWrappers`），实测 AOT 产物能正常采集 `WASAPI 环回 48000 Hz / 2 ch / 32 bit`；ShaderToy 播放器的 `WaveOut` 走 winmm，AOT 下也正常出声。
 
 ### Classic
 
@@ -275,7 +275,6 @@ MilkDrop.ProjectM.sln  MilkDrop.Classic.sln  HlslParser.sln
 - **仅 Windows x64**。Classic 绑死 D3D9；ProjectM 绑死 ANGLE 的 D3D11 后端与 WASAPI 环回。
 - ProjectM 线**不包含** projectM 的 C API 层、`ProjectMCWrapper`、SDL 前端；预设里的 user sprite 与歌曲标题动画未移植。
 - **ANGLE 用的是 Avalonia 构建的 `av_libglesv2.dll`**（真 x64，EGL 入口带 `EGL_` 前缀）。Silk.NET 自带的 ANGLE 原生包在 `runtimes/win-x64` 下是 x86 二进制，放到 x64 进程会 `BadImageFormatException`。
-- **AOT 版 ProjectM 无音频**（NAudio WASAPI 的 COM 类在 ILC 下无有效 IL），自动静音降级。
 - `--fullscreen` 时以显示器当前模式为准，`--width/--height` 不生效。
 - 9795 个预设里有 67 个（0.68%）加载失败，原因都是预设文件自身的语法/寄存器错误，与移植无关。
 

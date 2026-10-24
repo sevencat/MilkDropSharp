@@ -21,8 +21,7 @@
     <StripSymbols>true</StripSymbols>
     <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <!-- NAudio 的 WASAPI 走 COM 互操作；NativeAOT 下需要内建 COM 支持（会有 IL3050 警告）。 -->
-    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- NAudio 3 的 WASAPI 改用 [GeneratedComInterface] + ComWrappers，不再需要内建 COM 支持。 -->
     <!-- 关掉用不到的基础设施，减小体积。 -->
     <EventSourceSupport>false</EventSourceSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
@@ -43,7 +42,7 @@
     <TrimmerRootAssembly Include="Silk.NET.Input.Glfw" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="NAudio.Wasapi" Version="3.3.0" />
     <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />

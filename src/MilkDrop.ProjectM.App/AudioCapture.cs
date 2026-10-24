@@ -1,4 +1,7 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using MilkDrop.ProjectM.Audio;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
 namespace MilkDrop.ProjectM.App;
@@ -10,11 +13,13 @@ namespace MilkDrop.ProjectM.App;
 /// 没有音频设备（CI、无声卡）时构造不抛异常，只是 <see cref="IsRunning"/> 为 false，
 /// 此时预设仍然照常渲染（静音驱动的波形）。
 /// </remarks>
+[SupportedOSPlatform("windows")]
 public sealed class AudioCapture : IDisposable
 {
     private readonly Pcm _pcm;
-    private WasapiLoopbackCapture? _capture;
+    private WasapiRecorder? _recorder;
     private float[] _floatBuffer = [];
+    private short[] _shortBuffer = [];
 
     public AudioCapture(Pcm pcm)
     {
@@ -23,80 +28,99 @@ public sealed class AudioCapture : IDisposable
 
         try
         {
-            _capture = new WasapiLoopbackCapture();
-            _capture.DataAvailable += OnDataAvailable;
-            _capture.RecordingStopped += OnRecordingStopped;
-            _capture.StartRecording();
+            // NAudio 3 把 WASAPI 的 COM 层换成了 [GeneratedComInterface] + ComWrappers，
+            // 所以这里在 NativeAOT 下也能用（2.x 的 WasapiLoopbackCapture 会炸在 COM 激活上）。
+            _recorder = new WasapiRecorderBuilder()
+                .WithLoopbackCapture()
+                .Build();
 
-            WaveFormat format = _capture.WaveFormat;
+            _recorder.DataAvailable += OnDataAvailable;
+            _recorder.RecordingStopped += OnRecordingStopped;
+            _recorder.StartRecording();
+
+            WaveFormat format = _recorder.WaveFormat;
             Console.WriteLine($"音频采集: WASAPI 环回 {format.SampleRate} Hz / {format.Channels} ch / {format.BitsPerSample} bit");
         }
         catch (Exception ex)
         {
             LastError = ex.Message;
-            _capture?.Dispose();
-            _capture = null;
+            _recorder?.Dispose();
+            _recorder = null;
             Console.WriteLine("音频采集不可用（静音渲染）: " + ex.Message);
         }
     }
 
     /// <summary>是否正在采集。</summary>
-    public bool IsRunning => _capture is not null;
+    public bool IsRunning => _recorder is not null;
 
     /// <summary>启动失败原因（正常时为 null）。</summary>
     public string? LastError { get; }
 
     public void Dispose()
     {
-        if (_capture is null)
+        if (_recorder is null)
         {
             return;
         }
 
         try
         {
-            _capture.StopRecording();
+            _recorder.StopRecording();
         }
         catch (Exception)
         {
             // 设备已移除时会抛，忽略。
         }
 
-        _capture.DataAvailable -= OnDataAvailable;
-        _capture.RecordingStopped -= OnRecordingStopped;
-        _capture.Dispose();
-        _capture = null;
+        _recorder.DataAvailable -= OnDataAvailable;
+        _recorder.RecordingStopped -= OnRecordingStopped;
+        _recorder.Dispose();
+        _recorder = null;
     }
 
-    private void OnDataAvailable(object? sender, WaveInEventArgs e)
+    private void OnDataAvailable(ReadOnlySpan<byte> buffer, AudioClientBufferFlags flags, long devicePosition, long qpcPosition)
     {
-        if (_capture is null || e.BytesRecorded == 0)
+        if (_recorder is null || buffer.IsEmpty)
         {
             return;
         }
 
-        WaveFormat format = _capture.WaveFormat;
+        WaveFormat format = _recorder.WaveFormat;
         int channels = Math.Max(1, format.Channels);
 
         if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32)
         {
-            int sampleFrames = e.BytesRecorded / (4 * channels);
-
-            if (_floatBuffer.Length < sampleFrames * channels)
+            int sampleFrames = buffer.Length / (4 * channels);
+            int count = sampleFrames * channels;
+            if (count == 0)
             {
-                _floatBuffer = new float[sampleFrames * channels];
+                return;
             }
 
-            Buffer.BlockCopy(e.Buffer, 0, _floatBuffer, 0, sampleFrames * channels * 4);
-            _pcm.Add(_floatBuffer.AsSpan(0, sampleFrames * channels), channels, sampleFrames);
+            if (_floatBuffer.Length < count)
+            {
+                _floatBuffer = new float[count];
+            }
+
+            MemoryMarshal.Cast<byte, float>(buffer[..(count * 4)]).CopyTo(_floatBuffer.AsSpan(0, count));
+            _pcm.Add(_floatBuffer.AsSpan(0, count), channels, sampleFrames);
         }
         else if (format.BitsPerSample == 16)
         {
-            int sampleFrames = e.BytesRecorded / (2 * channels);
-            var samples = new short[sampleFrames * channels];
+            int sampleFrames = buffer.Length / (2 * channels);
+            int count = sampleFrames * channels;
+            if (count == 0)
+            {
+                return;
+            }
 
-            Buffer.BlockCopy(e.Buffer, 0, samples, 0, sampleFrames * channels * 2);
-            _pcm.Add(samples.AsSpan(0, sampleFrames * channels), channels, sampleFrames);
+            if (_shortBuffer.Length < count)
+            {
+                _shortBuffer = new short[count];
+            }
+
+            MemoryMarshal.Cast<byte, short>(buffer[..(count * 2)]).CopyTo(_shortBuffer.AsSpan(0, count));
+            _pcm.Add(_shortBuffer.AsSpan(0, count), channels, sampleFrames);
         }
     }
 

@@ -1,4 +1,7 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using MilkDrop.Classic.Visualizer.Audio;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
 namespace MilkDrop.Classic.App;
@@ -11,12 +14,13 @@ namespace MilkDrop.Classic.App;
 /// 采集线程把样本推入一个 float 环形队列，主线程每帧拉一小段，
 /// 转成 int8 的量化误差由 <see cref="AudioRingBuffer.FltToInt"/> 负责（对齐 audiobuf.cpp）。
 /// </remarks>
+[SupportedOSPlatform("windows")]
 public sealed class WasapiLoopbackAudioSource : IAudioSource
 {
     /// <summary>环形队列长度（float 个数，立体声交错），约 90ms @ 44.1kHz。</summary>
     private const int RingLength = 16384;
 
-    private readonly WasapiLoopbackCapture _capture;
+    private readonly WasapiRecorder _capture;
     private readonly float[] _ring = new float[RingLength];
     private readonly object _gate = new();
     private readonly bool _isFloat;
@@ -29,7 +33,10 @@ public sealed class WasapiLoopbackAudioSource : IAudioSource
 
     public WasapiLoopbackAudioSource()
     {
-        _capture = new WasapiLoopbackCapture();
+        // NAudio 3：WASAPI 走 [GeneratedComInterface] + ComWrappers，NativeAOT 下可用
+        _capture = new WasapiRecorderBuilder()
+            .WithLoopbackCapture()
+            .Build();
 
         var format = _capture.WaveFormat;
         _bytesPerSample = format.BitsPerSample / 8;
@@ -99,16 +106,16 @@ public sealed class WasapiLoopbackAudioSource : IAudioSource
         }
     }
 
-    private void OnDataAvailable(object? sender, WaveInEventArgs e)
+    private void OnDataAvailable(ReadOnlySpan<byte> buffer, AudioClientBufferFlags flags, long devicePosition, long qpcPosition)
     {
         var format = _capture.WaveFormat;
         var blockAlign = format.BlockAlign;
-        if (blockAlign <= 0)
+        if (blockAlign <= 0 || buffer.IsEmpty)
         {
             return;
         }
 
-        var frames = e.BytesRecorded / blockAlign;
+        var frames = buffer.Length / blockAlign;
         var channels = format.Channels;
 
         lock (_gate)
@@ -116,16 +123,16 @@ public sealed class WasapiLoopbackAudioSource : IAudioSource
             for (var i = 0; i < frames; i++)
             {
                 var offset = i * blockAlign;
-                var left = ReadSample(e.Buffer, offset);
-                var right = channels >= 2 ? ReadSample(e.Buffer, offset + _bytesPerSample) : left;
+                var left = ReadSample(buffer, offset);
+                var right = channels >= 2 ? ReadSample(buffer, offset + _bytesPerSample) : left;
                 Push(left, right);
             }
         }
     }
 
-    private float ReadSample(byte[] buffer, int offset) => _isFloat
-        ? BitConverter.ToSingle(buffer, offset)
-        : BitConverter.ToInt16(buffer, offset) / 32768f;
+    private float ReadSample(ReadOnlySpan<byte> buffer, int offset) => _isFloat
+        ? MemoryMarshal.Read<float>(buffer[offset..])
+        : MemoryMarshal.Read<short>(buffer[offset..]) / 32768f;
 
     /// <summary>调用方必须持有 <see cref="_gate"/>。队列满时丢最老的样本，保证总是最新音频。</summary>
     private void Push(float left, float right)

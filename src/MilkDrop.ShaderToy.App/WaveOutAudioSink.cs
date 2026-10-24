@@ -1,10 +1,11 @@
+using System.Runtime.Versioning;
 using MilkDrop.ShaderToy.Audio;
 using NAudio.Wave;
 
 namespace MilkDrop.ShaderToy.App;
 
 /// <summary>
-/// 音频输出：NAudio 的 <see cref="WaveOutEvent"/>（winmm 的托管封装）。
+/// 音频输出：NAudio 的 <see cref="WaveOut"/>（winmm 的托管封装）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -13,22 +14,24 @@ namespace MilkDrop.ShaderToy.App;
 /// <see cref="AudioBuffer"/> 的重采样路径仍然保留（后端报别的采样率时自动生效）。
 /// </para>
 /// <para>
-/// 缓冲 3 段 × 20 ms（<c>DesiredLatency</c> = 60）：够吸收一帧的渲染抖动，又不至于让画面
+/// 缓冲 3 段 × 20 ms（总延迟 60 ms）：够吸收一帧的渲染抖动，又不至于让画面
 /// 与声音差出人眼能察觉的量。
 /// </para>
 /// <para>
-/// AOT 下不要走 WASAPI（<c>MMDeviceEnumeratorComObject..ctor()</c> 会抛 <c>InvalidProgram</c>，
-/// 见 S6-6），所以这里只用 winmm 后端。拿不到设备时由调用方回落到 <see cref="NullAudioSink"/>。
+/// 只用 winmm 后端（纯 P/Invoke，AOT 安全）。NAudio 3 起 WASAPI 也改成
+/// <c>[GeneratedComInterface]</c> 了，但输出侧没必要再引入 COM。
+/// 拿不到设备时由调用方回落到 <see cref="NullAudioSink"/>。
 /// </para>
 /// </remarks>
+[SupportedOSPlatform("windows")]
 internal sealed class WaveOutAudioSink : IAudioSink
 {
-    private WaveOutEvent? _device;
+    private WaveOut? _device;
     private BufferProvider? _provider;
 
     public int SampleRate => AudioBuffer.SampleRate;
 
-    public string Description => "NAudio WaveOutEvent (winmm, 44100 Hz 16-bit stereo)";
+    public string Description => "NAudio WaveOut (winmm, 44100 Hz 16-bit stereo)";
 
     public void Start(AudioBuffer buffer)
     {
@@ -37,9 +40,10 @@ internal sealed class WaveOutAudioSink : IAudioSink
         Stop();
 
         _provider = new BufferProvider(buffer);
-        _device = new WaveOutEvent
+        _device = new WaveOut
         {
-            DesiredLatency = 60,
+            // NAudio 3 用「每块毫秒数」，不再是 2.x 的 DesiredLatency 总延迟
+            BufferMilliseconds = 20,
             NumberOfBuffers = 3,
         };
 
@@ -68,9 +72,10 @@ internal sealed class WaveOutAudioSink : IAudioSink
 
         public WaveFormat WaveFormat { get; } = new(AudioBuffer.SampleRate, 16, 2);
 
-        public int Read(byte[] destination, int offset, int count)
+        // NAudio 3 的 IWaveProvider 换成了 Span 版本（3.x 的 breaking change）
+        public int Read(Span<byte> destination)
         {
-            int frames = count / 4;
+            int frames = destination.Length / 4;
             if (frames == 0)
             {
                 return 0;
@@ -87,8 +92,8 @@ internal sealed class WaveOutAudioSink : IAudioSink
             for (var i = 0; i < frames * 2; i++)
             {
                 short sample = (short)Math.Clamp((int)(_scratch[i] * short.MaxValue), short.MinValue, short.MaxValue);
-                destination[offset + (i * 2)] = (byte)(sample & 0xFF);
-                destination[offset + (i * 2) + 1] = (byte)((sample >> 8) & 0xFF);
+                destination[i * 2] = (byte)(sample & 0xFF);
+                destination[(i * 2) + 1] = (byte)((sample >> 8) & 0xFF);
             }
 
             return frames * 4;

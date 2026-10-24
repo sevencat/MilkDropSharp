@@ -19,6 +19,9 @@ namespace MilkDrop.ProjectM.App;
 /// 对应 <c>refcode/projectM/frontend-sdl-cpp-2.0.0-pre1</c> 里 SDL 前端的工作（建窗口、主循环、
 /// 快捷键、预设切换），只是这里换成 Silk.NET.Windowing + ANGLE(EGL) + ImGui。
 /// </remarks>
+// 整个 App 只跑 Windows x64（ANGLE/D3D11 + win32 句柄 + WASAPI 环回），
+// 标注出来是为了让 CA1416 在调用 AudioCapture 时不再报警。
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 internal static class Program
 {
     private static IWindow? _window;

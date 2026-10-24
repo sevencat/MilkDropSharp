@@ -38,8 +38,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 音频输出（winmm 后端）：JIT 用 NAudio，AOT 兜底见 WaveOutAudioSink 的注释 -->
-    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- 音频输出（winmm 后端）：NAudio 3 拆分包，WaveOut 在 NAudio.WinMM 里 -->
+    <PackageReference Include="NAudio.WinMM" Version="3.3.0" />
     <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />

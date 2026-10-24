@@ -5,9 +5,9 @@ namespace MilkDrop.ShaderToy.Audio;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 抽象出这一层是因为 AOT 下 NAudio 的 WASAPI 会直接崩（<c>projectMIssue.md</c>：
-/// <c>MMDeviceEnumeratorComObject..ctor()</c> 被编译成必定抛异常的桩），所以音频设备相关的
-/// 具体实现留在 App 层，库层只认这个接口（<c>shaderToyIssue.md</c> S6-6）。
+/// 抽象出这一层是为了让库层不依赖任何 Windows 音频 API：具体实现留在 App 层
+/// （<c>WaveOutAudioSink</c> 走 NAudio 的 winmm 后端，AOT 安全）。<c>shaderToyIssue.md</c> S6-6
+/// 记录的是 NAudio 2.x 的 WASAPI 在 AOT 下会崩的坑，升级到 NAudio 3 后已不复存在。
 /// </para>
 /// <para>
 /// 数据流：<see cref="SoundPassRenderer"/> 在 GPU 上批量算出采样 → <see cref="AudioBuffer"/> →

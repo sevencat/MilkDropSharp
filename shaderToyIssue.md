@@ -416,6 +416,9 @@
 - **实测**：`IAudioSink` 放在库层（`Audio/IAudioSink.cs`），NAudio 只出现在 App 层的 `WaveOutAudioSink`，
   用的是 `WaveOutEvent`（winmm），**没有碰 WASAPI**。JIT 下连跑 12 秒正常出声、无异常。
   `NullAudioSink` 作为"没设备/静音"的兜底。AOT 发布（P9）还没跑，所以"winmm 在 ILC 产物里也能用"仍属待验证。
+- **后续（已验证）**：升级到 NAudio 3 后，AOT 产物里 `WaveOut` 正常启动，日志为
+  `音频: sound pass 已启用（NAudio WaveOut (winmm, 44100 Hz 16-bit stereo)）`。
+  `projectMIssue.md` I-43 的 WASAPI 崩溃也一起解决了（3.x 改用 `[GeneratedComInterface]`）。
 
 ### S6-7 音频通道纹理（music / musicstream）的格式（已确认，P6 实测）
 

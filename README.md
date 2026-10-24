@@ -221,10 +221,11 @@ cimgui.dll                  1.2 MB   Dear ImGui native bindings
 glfw3.dll                   0.2 MB   windowing / input
 ```
 
-Cold start is 0.46 s (0.71 s for the JIT build). **Known limitation**: NAudio's WASAPI does not
-work under AOT (`MMDeviceEnumeratorComObject..ctor()` is compiled into a stub that always throws),
-so audio silently degrades to a static signal while rendering continues normally. Use the JIT build
-or `--synthetic-audio` if you need sound.
+Cold start is 0.46 s (0.71 s for the JIT build). **Audio works under AOT too**: ProjectM and Classic
+now use NAudio 3's `WasapiRecorder` (WASAPI's COM layer was rewritten with
+`[GeneratedComInterface]` + `ComWrappers`), and the AOT build captures
+`WASAPI loopback 48000 Hz / 2 ch / 32 bit` in practice. The ShaderToy player's `WaveOut` goes through
+winmm, which is AOT-safe as well.
 
 ### Classic
 
@@ -315,8 +316,6 @@ MilkDrop.ProjectM.sln  MilkDrop.Classic.sln  HlslParser.sln
 - **ANGLE comes from Avalonia's build of `av_libglesv2.dll`** (genuinely x64, with `EGL_`-prefixed
   EGL entry points). The ANGLE native package shipped by Silk.NET is an x86 binary in
   `runtimes/win-x64` and throws `BadImageFormatException` inside an x64 process.
-- **The AOT build of ProjectM has no audio** (NAudio's WASAPI COM class has no valid IL under ILC);
-  it degrades to silence automatically.
 - With `--fullscreen` the display's current mode wins; `--width` / `--height` are ignored.
 - 67 of the 9795 presets (0.68%) fail to load; all of them are broken preset files (syntax or
   register errors), not porting issues.

@@ -472,18 +472,18 @@ internal static class Program
             return new SilenceAudioSource();
         }
 
-        // NAudio 的 CoreAudioApi 靠 [ComImport] 的 coclass（MMDeviceEnumeratorComObject）建对象，
-        // Native AOT 不支持这种 COM 激活（ILC 直接把构造函数编译成 throw），所以 AOT 构建里
-        // 连试都别试，直接静音：否则每帧都是空的，日志里还多一条 "invalid program"。
-        if (!RuntimeFeature.IsDynamicCodeCompiled)
+        // NAudio 3 的 WASAPI 改用 [GeneratedComInterface] + ComWrappers，Native AOT 下也能激活了
+        // （2.x 的 MMDeviceEnumeratorComObject 在 AOT 里会被 ILC 编成直接 throw）。
+        if (!OperatingSystem.IsWindows())
         {
-            Console.WriteLine("Native AOT 构建：NAudio 的 WASAPI 回环不可用（COM 激活不支持），音频退回静音。");
             return new SilenceAudioSource();
         }
 
         try
         {
-            return new WasapiLoopbackAudioSource();
+            var source = new WasapiLoopbackAudioSource();
+            Console.WriteLine($"音频采集: {source.Name} {source.SampleRate} Hz / {source.Channels} ch");
+            return source;
         }
         catch (Exception ex)
         {
