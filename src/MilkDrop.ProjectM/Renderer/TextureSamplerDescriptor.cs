@@ -1,5 +1,5 @@
-using System.Numerics;
-using MilkDrop.ProjectM.Rendering;
+﻿using System.Numerics;
+using MilkDrop.Rendering.Gles3;
 
 namespace MilkDrop.ProjectM.Renderer;
 

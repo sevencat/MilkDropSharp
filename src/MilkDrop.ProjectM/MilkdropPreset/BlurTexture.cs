@@ -1,11 +1,11 @@
-using System.Numerics;
+﻿using System.Numerics;
 using MilkDrop.ProjectM.Renderer;
-using MilkDrop.ProjectM.Rendering;
+using MilkDrop.Rendering.Gles3;
 using Silk.NET.OpenGLES;
-using Framebuffer = MilkDrop.ProjectM.Renderer.Framebuffer;
-using Sampler = MilkDrop.ProjectM.Renderer.Sampler;
-using Shader = MilkDrop.ProjectM.Renderer.Shader;
-using Texture = MilkDrop.ProjectM.Renderer.Texture;
+using Framebuffer = MilkDrop.Rendering.Gles3.Framebuffer;
+using Sampler = MilkDrop.Rendering.Gles3.Sampler;
+using Shader = MilkDrop.Rendering.Gles3.Shader;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 using TextureSamplerDescriptor = MilkDrop.ProjectM.Renderer.TextureSamplerDescriptor;
 
 namespace MilkDrop.ProjectM.MilkdropPreset;

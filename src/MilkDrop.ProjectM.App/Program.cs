@@ -1,9 +1,9 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using ImGuiNET;
-using MilkDrop.ProjectM.Rendering;
+using MilkDrop.Rendering.Gles3;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGLES;
@@ -501,7 +501,10 @@ internal static class Program
                     SaveScreenshot(_options.ScreenshotPath);
                 }
 
-                Console.WriteLine($"smoke: 已渲染 {_framesRendered} 帧，平均 {_fps:0.0} FPS，退出。");
+                // 注意用 _elapsed 算真实的全程平均：_fps 是 0.5s 窗口的 EMA，
+                // 帧数少 + 首帧编译着色器耗时长时会停在第一个窗口的假低值上（例如 1.6 FPS）。
+                double averageFps = _elapsed > 0 ? _framesRendered / _elapsed : 0;
+                Console.WriteLine($"smoke: 已渲染 {_framesRendered} 帧，平均 {averageFps:0.0} FPS，退出。");
                 window.Close();
             }
         }

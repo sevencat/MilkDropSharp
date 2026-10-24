@@ -1,10 +1,11 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using MilkDrop.ProjectM.Audio;
-using MilkDrop.ProjectM.Rendering;
+using MilkDrop.Rendering.Gles3;
 using Silk.NET.OpenGLES;
-using Shader = MilkDrop.ProjectM.Renderer.Shader;
-using Texture = MilkDrop.ProjectM.Renderer.Texture;
+using Sampler = MilkDrop.Rendering.Gles3.Sampler;
+using Shader = MilkDrop.Rendering.Gles3.Shader;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 
 namespace MilkDrop.ProjectM.Renderer;
 

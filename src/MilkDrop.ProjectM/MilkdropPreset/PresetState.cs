@@ -1,6 +1,6 @@
-using MilkDrop.ProjectM.Audio;
+﻿using MilkDrop.ProjectM.Audio;
 using MilkDrop.ProjectM.Renderer;
-using MilkDrop.ProjectM.Rendering;
+using MilkDrop.Rendering.Gles3;
 
 namespace MilkDrop.ProjectM.MilkdropPreset;
 
@@ -22,8 +22,8 @@ namespace MilkDrop.ProjectM.MilkdropPreset;
 public sealed class PresetState : IDisposable
 {
     private BlurTexture? _blurTexture;
-    private Renderer.Shader? _untexturedShader;
-    private Renderer.Shader? _texturedShader;
+    private Shader? _untexturedShader;
+    private Shader? _texturedShader;
 
     /// <summary>正交投影矩阵（列主序，直接喂 <c>glUniformMatrix4fv</c>）：<c>glm::ortho(-1, 1, 1, -1, -40, 40)</c>。</summary>
     public static readonly float[] OrthogonalProjection =
@@ -209,12 +209,12 @@ public sealed class PresetState : IDisposable
     /// 画不带纹理的图元（边框、暗角中心）的着色器（对应 C++ 的 <c>untexturedShader</c>）。
     /// 第一次访问时才编译，避免纯数据测试被迫初始化 GL。
     /// </summary>
-    public Renderer.Shader UntexturedShader => _untexturedShader ??= CreateUntexturedShader();
+    public Shader UntexturedShader => _untexturedShader ??= CreateUntexturedShader();
 
     /// <summary>
     /// 画带纹理的图元（视频回声、纹理化形状）的着色器（对应 C++ 的 <c>texturedShader</c>）。
     /// </summary>
-    public Renderer.Shader TexturedShader => _texturedShader ??= CreateTexturedShader();
+    public Shader TexturedShader => _texturedShader ??= CreateTexturedShader();
 
     /// <summary>释放惰性创建的 GL 资源（模糊链与两个通用着色器）。</summary>
     public void Dispose()
@@ -233,22 +233,22 @@ public sealed class PresetState : IDisposable
     }
 
     /// <remarks>对应 <c>PresetState.cpp:19-23</c>。</remarks>
-    private static Renderer.Shader CreateUntexturedShader()
+    private static Shader CreateUntexturedShader()
     {
         MilkdropStaticShaders staticShaders = MilkdropStaticShaders.Get();
 
-        var shader = new Renderer.Shader();
+        var shader = new Shader();
         shader.CompileProgram(staticShaders.GetUntexturedDrawVertexShader(),
                               staticShaders.GetUntexturedDrawFragmentShader());
         return shader;
     }
 
     /// <remarks>对应 <c>PresetState.cpp:22-23</c>。</remarks>
-    private static Renderer.Shader CreateTexturedShader()
+    private static Shader CreateTexturedShader()
     {
         MilkdropStaticShaders staticShaders = MilkdropStaticShaders.Get();
 
-        var shader = new Renderer.Shader();
+        var shader = new Shader();
         shader.CompileProgram(staticShaders.GetTexturedDrawVertexShader(),
                               staticShaders.GetTexturedDrawFragmentShader());
         return shader;

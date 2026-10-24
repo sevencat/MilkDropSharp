@@ -1,14 +1,14 @@
-using System.Text;
+﻿using System.Text;
 using MilkDrop.ProjectM.Audio;
 using MilkDrop.ProjectM.MilkdropPreset;
 using MilkDrop.ProjectM.Renderer;
 using MilkdropPresetType = MilkDrop.ProjectM.MilkdropPreset.MilkdropPreset;
-using MilkDrop.ProjectM.Rendering;
+using MilkDrop.Rendering.Gles3;
 using MilkDrop.ProjectM.Tests.Rendering;
 using Silk.NET.OpenGLES;
 using Xunit;
-using Framebuffer = MilkDrop.ProjectM.Renderer.Framebuffer;
-using Texture = MilkDrop.ProjectM.Renderer.Texture;
+using Framebuffer = MilkDrop.Rendering.Gles3.Framebuffer;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 
 namespace MilkDrop.ProjectM.Tests;
 

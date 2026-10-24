@@ -1,6 +1,8 @@
-using System.Reflection;
-using MilkDrop.ProjectM.Rendering;
+﻿using System.Reflection;
+using MilkDrop.Rendering.Gles3;
 using Silk.NET.OpenGLES;
+using Sampler = MilkDrop.Rendering.Gles3.Sampler;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 using StbImageSharp;
 
 namespace MilkDrop.ProjectM.Renderer;

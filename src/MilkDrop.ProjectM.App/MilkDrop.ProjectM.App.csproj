@@ -55,6 +55,11 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MilkDrop.ProjectM\MilkDrop.ProjectM.csproj" />
+    <!-- ImGui GLES3 后端 / 截图 / EGL 上下文都在公共库里 -->
+    <ProjectReference Include="..\MilkDrop.Rendering.Gles3\MilkDrop.Rendering.Gles3.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="MilkDrop.Rendering.Gles3" />
   </ItemGroup>
   <ItemGroup>
     <None Include="milkdropsharp.ico" />

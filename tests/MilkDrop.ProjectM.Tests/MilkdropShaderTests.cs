@@ -1,12 +1,12 @@
-using HlslParser;
+﻿using HlslParser;
 using MilkDrop.ProjectM.MilkdropPreset;
 using MilkDrop.ProjectM.Renderer;
 using MilkDrop.ProjectM.Tests.Rendering;
 using Xunit;
 using GLEnum = Silk.NET.OpenGLES.GLEnum;
-using Sampler = MilkDrop.ProjectM.Renderer.Sampler;
-using Shader = MilkDrop.ProjectM.Renderer.Shader;
-using Texture = MilkDrop.ProjectM.Renderer.Texture;
+using Sampler = MilkDrop.Rendering.Gles3.Sampler;
+using Shader = MilkDrop.Rendering.Gles3.Shader;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 
 namespace MilkDrop.ProjectM.Tests;
 

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>MilkDrop.Rendering.Gles3</RootNamespace>
+    <AssemblyName>MilkDrop.Rendering.Gles3</AssemblyName>
+    <!-- 与 ProjectM 一致：日常构建就跑裁剪/AOT 分析器 -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ANGLE（OpenGL ES 3.0）绑定。EGL 入口在本库 Egl.cs 里自行 P/Invoke（Silk.NET.OpenGLES 不含 EGL 绑定） -->
+    <PackageReference Include="Silk.NET.OpenGLES" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+    <PackageReference Include="ImGui.NET" Version="1.90.9.1" />
+    <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      ANGLE 原生库。Silk.NET.OpenGLES.ANGLE.Native 的 runtimes/win-x64 里是 x86 二进制（会 BadImageFormatException），
+      所以用 Avalonia 的构建（真 x64，单 DLL：av_libglesv2.dll，EGL 入口带 "EGL_" 前缀）。详见 projectMIssue.md I-1/I-2。
+      放在公共库里，任何引用本库的 App 都会自动带上这个原生依赖。
+    -->
+    <PackageReference Include="Avalonia.Angle.Windows.Natives" Version="2.1.27548.20260419" GeneratePathProperty="true" ExcludeAssets="all" />
+    <Content Include="$(PkgAvalonia_Angle_Windows_Natives)\runtimes\win-x64\native\*.dll"
+             Link="%(Filename)%(Extension)"
+             CopyToOutputDirectory="Always"
+             Visible="false" />
+  </ItemGroup>
+</Project>

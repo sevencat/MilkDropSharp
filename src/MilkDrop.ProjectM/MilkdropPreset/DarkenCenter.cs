@@ -1,7 +1,7 @@
-using MilkDrop.ProjectM.Renderer;
-using MilkDrop.ProjectM.Rendering;
+﻿using MilkDrop.ProjectM.Renderer;
+using MilkDrop.Rendering.Gles3;
 using Silk.NET.OpenGLES;
-using Shader = MilkDrop.ProjectM.Renderer.Shader;
+using Shader = MilkDrop.Rendering.Gles3.Shader;
 
 namespace MilkDrop.ProjectM.MilkdropPreset;
 

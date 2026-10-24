@@ -11,7 +11,13 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\MilkDrop.ProjectM\MilkDrop.ProjectM.csproj" />
+    <ProjectReference Include="..\..\src\MilkDrop.Rendering.Gles3\MilkDrop.Rendering.Gles3.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- 渲染封装已搬到公共库；个别文件里 GlslVersion 与 HlslParser 同名，用别名消歧 -->
+    <Using Include="MilkDrop.Rendering.Gles3" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- 离屏 GL 测试需要 ANGLE 原生库（与 App 相同的来源，见 App.csproj 的注释） -->
     <PackageReference Include="Avalonia.Angle.Windows.Natives" Version="2.1.27548.20260419"

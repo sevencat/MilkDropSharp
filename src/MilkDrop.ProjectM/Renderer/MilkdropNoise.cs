@@ -1,4 +1,5 @@
-using Silk.NET.OpenGLES;
+﻿using Silk.NET.OpenGLES;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 
 namespace MilkDrop.ProjectM.Renderer;
 
@@ -261,7 +262,7 @@ public static class MilkdropNoise
     private static unsafe Texture CreateTexture2D(string name, uint[] data)
     {
         int size = (int)Math.Sqrt(data.Length);
-        var gl = Rendering.GlContext.Gl;
+        var gl = GlContext.Gl;
 
         uint textureId = gl.GenTexture();
         gl.BindTexture(GLEnum.Texture2D, textureId);
@@ -281,7 +282,7 @@ public static class MilkdropNoise
     private static unsafe Texture CreateTexture3D(string name, uint[] data)
     {
         int size = (int)Math.Round(Math.Pow(data.Length, 1.0 / 3.0));
-        var gl = Rendering.GlContext.Gl;
+        var gl = GlContext.Gl;
 
         uint textureId = gl.GenTexture();
         gl.BindTexture(GLEnum.Texture3D, textureId);

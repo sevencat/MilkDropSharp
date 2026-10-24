@@ -1,14 +1,14 @@
-using MilkDrop.ProjectM.Renderer;
-using MilkDrop.ProjectM.Rendering;
+﻿using MilkDrop.ProjectM.Renderer;
+using MilkDrop.Rendering.Gles3;
 using Silk.NET.OpenGLES;
 using Xunit;
 using Xunit.Abstractions;
 
 // Silk.NET.OpenGLES 里也有 Framebuffer/Shader/Texture 这些名字（它是 GL 句柄类型），
 // 这里全部指向我们自己的封装类。
-using Framebuffer = MilkDrop.ProjectM.Renderer.Framebuffer;
-using Shader = MilkDrop.ProjectM.Renderer.Shader;
-using Texture = MilkDrop.ProjectM.Renderer.Texture;
+using Framebuffer = MilkDrop.Rendering.Gles3.Framebuffer;
+using Shader = MilkDrop.Rendering.Gles3.Shader;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 
 namespace MilkDrop.ProjectM.Tests.Rendering;
 

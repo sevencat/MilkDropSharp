@@ -1,9 +1,9 @@
-using MilkDrop.ProjectM.Renderer;
-using MilkDrop.ProjectM.Rendering;
+﻿using MilkDrop.ProjectM.Renderer;
+using MilkDrop.Rendering.Gles3;
 using MilkDrop.ProjectM.Tests.Rendering;
 using Xunit;
 using GLEnum = Silk.NET.OpenGLES.GLEnum;
-using Texture = MilkDrop.ProjectM.Renderer.Texture;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 
 namespace MilkDrop.ProjectM.Tests;
 

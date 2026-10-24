@@ -1,4 +1,7 @@
 using HlslParser;
+
+// 公共库里也有一个 GlslVersion（GLSL ES 版本标记），这里明确用转译器的那个。
+using GlslVersion = HlslParser.GlslVersion;
 using Xunit;
 using Xunit.Abstractions;
 

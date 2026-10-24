@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Text;
 using System.Text.RegularExpressions;
 using HlslParser;
@@ -718,7 +718,7 @@ public sealed class MilkdropShader : IDisposable
     /// <summary>释放惰性创建的 GL program（C++ 里由 <c>Shader</c> 的析构函数负责）。</summary>
     public void Dispose()
     {
-        if (_shader is not null && Rendering.GlContext.IsInitialized)
+        if (_shader is not null && GlContext.IsInitialized)
         {
             _shader.Dispose();
         }

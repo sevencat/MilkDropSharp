@@ -1,9 +1,9 @@
-using MilkDrop.ProjectM.Audio;
+﻿using MilkDrop.ProjectM.Audio;
 using MilkDrop.ProjectM.Renderer;
-using MilkDrop.ProjectM.Rendering;
+using MilkDrop.Rendering.Gles3;
 using MilkDrop.ProjectM.MilkdropPreset.Waveforms;
 using Silk.NET.OpenGLES;
-using Shader = MilkDrop.ProjectM.Renderer.Shader;
+using Shader = MilkDrop.Rendering.Gles3.Shader;
 
 namespace MilkDrop.ProjectM.MilkdropPreset;
 

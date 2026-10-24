@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>MilkDrop.ShaderToy</RootNamespace>
+    <AssemblyName>MilkDrop.ShaderToy</AssemblyName>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.OpenGLES" Version="2.23.0" />
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- EGL/GL 封装、ImGui 后端都在公共库里 -->
+    <ProjectReference Include="..\MilkDrop.Rendering.Gles3\MilkDrop.Rendering.Gles3.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="MilkDrop.Rendering.Gles3" />
+  </ItemGroup>
+</Project>

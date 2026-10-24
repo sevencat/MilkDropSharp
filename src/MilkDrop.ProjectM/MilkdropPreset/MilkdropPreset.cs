@@ -1,9 +1,9 @@
-using MilkDrop.ProjectM.Audio;
+﻿using MilkDrop.ProjectM.Audio;
 using MilkDrop.ProjectM.Renderer;
-using MilkDrop.ProjectM.Rendering;
+using MilkDrop.Rendering.Gles3;
 using Silk.NET.OpenGLES;
-using Framebuffer = MilkDrop.ProjectM.Renderer.Framebuffer;
-using Texture = MilkDrop.ProjectM.Renderer.Texture;
+using Framebuffer = MilkDrop.Rendering.Gles3.Framebuffer;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 
 namespace MilkDrop.ProjectM.MilkdropPreset;
 

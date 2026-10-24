@@ -33,7 +33,7 @@
 | 浮点目标 | `RGBA16F`（image/cube）、`RGBA32F`（buffer/sound） | 与上游 format 一致；需 `EXT_color_buffer_float` |
 | UI | **ImGui.NET**（`cimgui.dll` + 现有 `ImguiGles3Renderer`） | 已有完整 GLES3 后端，AOT 也已验证 |
 | 音频输出 | `NAudio`（JIT）+ `winmm.waveOut` P/Invoke（AOT 兜底） | NAudio 的 WASAPI 在 AOT 下不可用（已知坑，见 `projectMIssue.md`） |
-| FFT | 复用 `src/MilkDrop.ProjectM/Audio/MilkdropFft.cs` | projectM 线已移植并测过，用来生成 Shadertoy 的音频通道纹理 |
+| FFT | **不复用** `MilkdropFft`，在 `MilkDrop.ShaderToy/Audio/MusicTexture.cs` 里自写 512 点 FFT | 原因见 `shaderToyIssue.md` S6-7：三线互不依赖，且 Shadertoy 要的是对数频率轴，projectM 的线性轴+均衡表本来就得重映射 |
 | JSON | `System.Text.Json` + **源生成**（`JsonSerializerContext`） | AOT 下不能用反射式序列化 |
 | 项目 | `src/MilkDrop.Rendering.Gles3/`（**P0 抽出的公共渲染库**）+ `src/MilkDrop.ShaderToy/`（库）+ `src/MilkDrop.ShaderToy.App/`（可执行）+ 独立 sln | 与 ProjectM 共用 GLES3 层，不复制第二份 |
 | buffer 分辨率 | 可配置：`viewport`（默认）/ `fixed`（1024×256）/ `scale` | 见 §5 P4 |
@@ -81,7 +81,8 @@ src/MilkDrop.ShaderToy/
   Compile/         ShaderToyTranspiler.cs  (ShaderToy GLSL → GLSL ES 3.00)
   Renderer/        PingPongTarget.cs  ChannelBinder.cs
   Channels/        TextureChannel.cs  BufferChannel.cs  CubeChannel.cs  VolumeChannel.cs  KeyboardChannel.cs  AudioChannel.cs
-  Audio/           SoundPassRenderer.cs  AudioOutput.cs  AudioAnalyzer.cs
+  Audio/           SoundPassRenderer.cs  AudioEngine.cs  AudioBuffer.cs  MusicTexture.cs  IAudioSink.cs
+                   （NAudio 的 WaveOutEvent 实现在 App 层：MilkDrop.ShaderToy.App/WaveOutAudioSink.cs）
   Import/          ShaderToyJson.cs
   Library/         LocalLibrary.cs  LibraryEntry.cs  ShaderToyDownloader.cs  AssetFetcher.cs
   Resources/       TextureLoader.cs  FontTexture.cs  BuiltinTextures.cs
@@ -184,7 +185,7 @@ MilkDrop.ShaderToy.sln
 
 - **验收**：每类通道各挑 2 个 shadertoy 作品跑通；键盘通道用“按 A 变色”的小 shader 自测。
 
-### P6 Sound pass 与音频输出（大，上游完全没有）
+### P6 Sound pass 与音频输出（大，上游完全没有）· **已落地**（实测记录见 `shaderToyIssue.md` S-P6）
 
 **语义备注：网页端到底在算什么**
 

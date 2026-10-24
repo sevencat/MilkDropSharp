@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>MilkDrop.ShaderToy.App</RootNamespace>
+    <AssemblyName>MilkDrop.ShaderToy.App</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationIcon>..\MilkDrop.ProjectM.App\milkdropsharp.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!--
+    Native AOT（与 ProjectM 线同款做法）：日常 dotnet run/build 不受影响，
+    只有显式 -p:PublishAot=true 时才生效。
+  -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <StripSymbols>true</StripSymbols>
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <!-- Silk.NET 的窗口/输入后端靠反射发现，裁剪会丢掉，需根住 -->
+    <TrimmerRootAssembly Include="Silk.NET.Windowing.Glfw" />
+    <TrimmerRootAssembly Include="Silk.NET.Input.Glfw" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 音频输出（winmm 后端）：JIT 用 NAudio，AOT 兜底见 WaveOutAudioSink 的注释 -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
+    <PackageReference Include="ImGui.NET" Version="1.90.9.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MilkDrop.ShaderToy\MilkDrop.ShaderToy.csproj" />
+    <ProjectReference Include="..\MilkDrop.Rendering.Gles3\MilkDrop.Rendering.Gles3.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="MilkDrop.Rendering.Gles3" />
+  </ItemGroup>
+</Project>

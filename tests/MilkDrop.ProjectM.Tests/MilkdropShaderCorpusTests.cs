@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using MilkDrop.ProjectM.MilkdropPreset;
@@ -7,9 +7,9 @@ using MilkDrop.ProjectM.Tests.Rendering;
 using Xunit;
 using Xunit.Abstractions;
 using GLEnum = Silk.NET.OpenGLES.GLEnum;
-using Sampler = MilkDrop.ProjectM.Renderer.Sampler;
-using Shader = MilkDrop.ProjectM.Renderer.Shader;
-using Texture = MilkDrop.ProjectM.Renderer.Texture;
+using Sampler = MilkDrop.Rendering.Gles3.Sampler;
+using Shader = MilkDrop.Rendering.Gles3.Shader;
+using Texture = MilkDrop.Rendering.Gles3.Texture;
 
 namespace MilkDrop.ProjectM.Tests;
 
