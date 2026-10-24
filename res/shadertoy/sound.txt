@@ -1,0 +1,113 @@
+// phase shift and rotation experiments
+
+
+#define f fract
+#define tau	(acos(-1.) * 2.)
+
+
+//base drum
+float bd(float t) 
+{
+  if (t > 1.) 
+  {
+    t *= 2.;
+    float o, x = 1. - f(t), k1 = 1.052502, k2 = 1.1230614;
+    x = pow(x, 8.);
+    x *= sin(60. * x);
+    o = cos(tanh(k2 * acos(x) / (k1 + x)) * 2. - 1.);
+    o *= min(1., 1e2 * f(t)) * max(0., 1. - f(t));
+    return 1. * o;
+  }
+
+  return 0.;
+}
+
+//hihat
+float hh(float t, float rt) 
+{
+  float y = 0.;
+  y = f(f(t * 1005.3096) * t * 8000.3934);
+  y *= exp(-5. * f(t)) / (1.927 - log(y));
+  y *= min(1., 20. * f(2. * rt)) * max(0., 1. - f(2. * rt));
+  return clamp(y, -1., 1.);
+}
+
+//siren effect
+float fx(float t, float rt) 
+{
+  #define dk(k,t,rt)((1.-exp(-k * f(t))) * exp(-k * f(rt > 12.5 || rt < 8.5 ? t : .124)))
+  float y = exp2(-vec2(1, .25)[int(1. / 7.5 * rt) % 2] * (1. - f(t)));
+  y *= sin(y * tau * 2489.6);
+  return .4 * y * dk(max(6., 4. + mod(floor(t), 15.)), y, rt);
+}
+
+//main synth
+float arp(float t, float rt) 
+{
+  float a, y = 0., o = 0., x = 0., p[] = float[](0., 0., 0., 0., 0.);
+
+  switch (int(1. / 12. * rt) % 3) 
+  {
+  case 0:
+    p = float[](54., 58., 61., 65., 54.);
+    break;
+  case 1:
+    p = float[](51., 54., 58., 61., 51.);
+    break;
+  case 2:
+    p = float[](53., 57., 60., 64., 53.);
+    break;
+  }
+
+  x = tau * t * 
+  mix(.4 * 8.175799 * exp2(p[int(8. * t) % 4] / 12.), .125, vec4(5, 3.09, 2.35, 2)[int(1. / 4. * rt) % 4]);
+  
+  y = abs(.143056 - sin(.5 * x) + .7 * cos(x));
+  
+  a = .91 + sin(mod(3. * rt, 6.28));
+  o = tanh(.006069 / (.4 * sin(x) * sin(a)) + cos(a - 1.48622 * x));
+  o = cos(o * 2. - 1.);
+  
+  y *= min(1., 5. * f(8. * t)) * max(0., 1. - f(8. * t));
+  
+  return (.7 * y + .25 * o * min(1., rt / 6.)) * min(1., 50. * f(1. * t)) * max(0., 1. - f(1. * t));
+}
+
+// matrix
+vec4 mfd(inout vec4 s, const in mat4 M, in uint i) 
+{
+  i = i % 4u;
+  s += (s[0] * M[i][0] + s[1] * M[(i + 1u) % 4u][1] + s[2] * M[(i + 2u) % 4u][2] + s[3] * M[(i + 3u) % 4u][3]);
+  return s;
+}
+
+vec2 mainSound(int s, float t) 
+{
+  vec4 r = vec4(1e-6), y = vec4(1e-6), dt = vec4(577, 601, 641, 661) / 441e2;
+  float dlt = t, tfx = 5.076;
+
+  for (uint j = 0u; j < 2u; ++j)
+    for (uint i = 0u; i < 8u; ++i) 
+    {
+    
+      y[i % 4u] = arp(dlt, t)
+                + 1.7 * fx(tfx + dlt, t) 
+                + .7 * bd(dlt) 
+                + .8 * hh(dlt, 4. * t);
+
+      (i % 2u == 0u) ? (r.x += y[i % 4u]) : (r.y += y[i % 4u]);//true stereo
+      (r.z += y[i % 4u]);
+      (r.w += y[i % 4u]);
+      
+      float g = .363425;
+      dt += g * mfd(dt, mat4(((i & i / 2u) == 0u) ? -1. : 1.) * 1. / sqrt(2.), i);
+      dlt += g * (dt.x + dt.y + dt.z + dt.w);
+
+    }
+
+  return.7 * (.55 * bd(t) 
+            + .1 * hh(4. * t, 4. * t) 
+            + .1 * fx(tfx + mod(1.001 * t, 8.), t) 
+            + .2 * arp(t, t) 
+            + 1. / float(16u) * mix(r.xy, r.wz, sin(t) * .5 + .5));
+}
