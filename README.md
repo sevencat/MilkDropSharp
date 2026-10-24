@@ -48,6 +48,39 @@ The two shared libraries are direct ports of their C++ counterparts and are used
 - **`src/HlslParser`** — port of `hlslparser`. Translates the HLSL snippets inside presets into
   GLSL (`Version330` / `Version300Es`); `tex2D` / `tex3D` / `register(...)` are all supported.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/projectm-crystal-palace.gif" width="420" alt="projectM: crystal palace" />
+  <img src="docs/projectm-neon-space.gif" width="420" alt="projectM: neon space" />
+</p>
+
+<p align="center">
+  <img src="docs/projectm-reaction-diffusion.png" width="420" alt="projectM: reaction diffusion" />
+  <img src="docs/classic.png" width="420" alt="MilkDrop3 Classic rendering" />
+</p>
+
+<p align="center">
+  <img src="docs/shadertoy-seascape.png" width="420" alt="ShaderToy: Seascape" />
+  <img src="docs/shadertoy-fractal-land.png" width="420" alt="ShaderToy: Fractal Land" />
+</p>
+
+Top row is the ProjectM port (ANGLE/GLES3) in motion: `Serge + martin - crystal palace008` and
+`martin - neon space ps3`. Middle left is a still from `Geiss - Reaction Diffusion 2`, middle right
+is the Classic port (D3D9) running `Flexi - crush ice 52s`. Bottom row is the ShaderToy player:
+`Seascape (Ms2SD1)` and `Fractal Land (XsBXWt)`, whole-window shots including the local library panel.
+
+## Download
+
+If you'd rather not install the .NET SDK or build it yourself, there is a prebuilt
+**Windows x64 package** (the three apps plus presets, textures and sample shaders — unzip and run):
+
+- Baidu Netdisk: <https://pan.baidu.com/s/1QTe2AXRftQvoQH7nxpUiMA?pwd=gbj7>
+- Extraction code: `gbj7`
+
+Unzip, then launch whichever exe you need; the ProjectM build reads `presets/` and `textures/` from
+its own folder by default.
+
 ## Status
 
 | Component | Status | How it was verified |

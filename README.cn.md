@@ -37,6 +37,36 @@
 - **`src/MilkDrop.Eval`** — `projectm-eval` 移植。ns-eel 表达式解释执行（`regNN` 槽、megabuf、gmegabuf、全套内建函数），**无 `Reflection.Emit`**，因此 Native AOT 安全。
 - **`src/HlslParser`** — `hlslparser` 移植。把预设里的 HLSL 片段转成 GLSL（`Version330` / `Version300Es`），`tex2D`/`tex3D`/`register(...)` 都支持。
 
+## 截图
+
+<p align="center">
+  <img src="docs/projectm-crystal-palace.gif" width="420" alt="projectM：crystal palace" />
+  <img src="docs/projectm-neon-space.gif" width="420" alt="projectM：neon space" />
+</p>
+
+<p align="center">
+  <img src="docs/projectm-reaction-diffusion.png" width="420" alt="projectM：reaction diffusion" />
+  <img src="docs/classic.png" width="420" alt="MilkDrop3 Classic 渲染" />
+</p>
+
+<p align="center">
+  <img src="docs/shadertoy-seascape.png" width="420" alt="ShaderToy：Seascape" />
+  <img src="docs/shadertoy-fractal-land.png" width="420" alt="ShaderToy：Fractal Land" />
+</p>
+
+上排是 ProjectM 线（ANGLE/GLES3）的实时画面：`Serge + martin - crystal palace008` 与 `martin - neon space ps3`；
+中排左是 `Geiss - Reaction Diffusion 2` 的静态帧，右是 Classic 线（D3D9）跑 `Flexi - crush ice 52s`；
+下排是 ShaderToy 播放器，左边 `Seascape (Ms2SD1)`，右边 `Fractal Land (XsBXWt)`，整窗截图里能看到本地库面板。
+
+## 下载
+
+不想装 .NET SDK、也不想自己编译的话，这里有打包好的 **Windows x64 免安装版**（三个 App + 预设 + 纹理 + 示例 shader，解压即用）：
+
+- 百度网盘：<https://pan.baidu.com/s/1QTe2AXRftQvoQH7nxpUiMA?pwd=gbj7>
+- 提取码：`gbj7`
+
+解压后直接双击需要的那一个 exe；ProjectM 版默认读同级目录的 `presets/` 与 `textures/`。
+
 ## 状态
 
 | 部分 | 状态 | 验证方式 |
