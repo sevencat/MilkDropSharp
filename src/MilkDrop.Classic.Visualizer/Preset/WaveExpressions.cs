@@ -39,15 +39,22 @@ public sealed class WaveExpressions
     private readonly IEelVariable[] _ppIn = new IEelVariable[3];
     private readonly IEelVariable[] _ppOut = new IEelVariable[6];
 
+    // 热路径（SyncPerPoint 对每个采样点都要跑一遍）不能再按名字查字典，
+    // 这些数组在构造时按上面几个名字表的顺序绑定好。
+    private readonly IEelVariable[] _pfReadOnly = new IEelVariable[ReadOnlyNames.Length];
+    private readonly IEelVariable[] _ppReadOnly = new IEelVariable[ReadOnlyNames.Length];
+    private readonly IEelVariable[] _pfIo = new IEelVariable[PerFrameIoNames.Length];
+
     public WaveExpressions(IExpressionEngine engine, int index)
     {
         PerFrameVm = engine.CreateVm($"wave{index}_per_frame");
         PerPointVm = engine.CreateVm($"wave{index}_per_point");
 
-        foreach (var name in ReadOnlyNames)
+        for (var i = 0; i < ReadOnlyNames.Length; i++)
         {
-            _pf[name] = PerFrameVm.RegisterVariable(name);
-            _pp[name] = PerPointVm.RegisterVariable(name);
+            var name = ReadOnlyNames[i];
+            _pf[name] = _pfReadOnly[i] = PerFrameVm.RegisterVariable(name);
+            _pp[name] = _ppReadOnly[i] = PerPointVm.RegisterVariable(name);
         }
 
         for (var i = 0; i < PerFrameVariables.NumQVar; i++)
@@ -62,9 +69,10 @@ public sealed class WaveExpressions
             _ppT[i] = _pp[$"t{i + 1}"] = PerPointVm.RegisterVariable($"t{i + 1}");
         }
 
-        foreach (var name in PerFrameIoNames)
+        for (var i = 0; i < PerFrameIoNames.Length; i++)
         {
-            _pf[name] = PerFrameVm.RegisterVariable(name);
+            var name = PerFrameIoNames[i];
+            _pf[name] = _pfIo[i] = PerFrameVm.RegisterVariable(name);
         }
 
         foreach (var name in PerPointInputNames)
@@ -164,16 +172,16 @@ public sealed class WaveExpressions
     /// </summary>
     public void SyncPerFrame(in PerFrameContext ctx, PerFrameVariables perFrame, PresetWave wave)
     {
-        _pf["time"].Value = ctx.Time;
-        _pf["fps"].Value = ctx.Fps;
-        _pf["frame"].Value = ctx.Frame;
-        _pf["progress"].Value = ctx.Progress;
-        _pf["bass"].Value = ctx.MySound.ImmRel[0];
-        _pf["mid"].Value = ctx.MySound.ImmRel[1];
-        _pf["treb"].Value = ctx.MySound.ImmRel[2];
-        _pf["bass_att"].Value = ctx.MySound.AvgRel[0];
-        _pf["mid_att"].Value = ctx.MySound.AvgRel[1];
-        _pf["treb_att"].Value = ctx.MySound.AvgRel[2];
+        _pfReadOnly[0].Value = ctx.Time;
+        _pfReadOnly[1].Value = ctx.Fps;
+        _pfReadOnly[2].Value = ctx.Frame;
+        _pfReadOnly[3].Value = ctx.Progress;
+        _pfReadOnly[4].Value = ctx.MySound.ImmRel[0];
+        _pfReadOnly[5].Value = ctx.MySound.ImmRel[1];
+        _pfReadOnly[6].Value = ctx.MySound.ImmRel[2];
+        _pfReadOnly[7].Value = ctx.MySound.AvgRel[0];
+        _pfReadOnly[8].Value = ctx.MySound.AvgRel[1];
+        _pfReadOnly[9].Value = ctx.MySound.AvgRel[2];
 
         CopyQFrom(perFrame);
         for (var i = 0; i < NumTVar; i++)
@@ -181,11 +189,12 @@ public sealed class WaveExpressions
             _t[i].Value = TValuesAfterInitCode[i];
         }
 
-        _pf["r"].Value = wave.R;
-        _pf["g"].Value = wave.G;
-        _pf["b"].Value = wave.B;
-        _pf["a"].Value = wave.A;
-        _pf["samples"].Value = wave.Samples;
+        // r, g, b, a, samples
+        _pfIo[0].Value = wave.R;
+        _pfIo[1].Value = wave.G;
+        _pfIo[2].Value = wave.B;
+        _pfIo[3].Value = wave.A;
+        _pfIo[4].Value = wave.Samples;
     }
 
     /// <summary>执行一次 per-frame 代码（milkdropfs.cpp:2541）；调用前先 <see cref="SyncPerFrame"/>。</summary>
@@ -196,9 +205,9 @@ public sealed class WaveExpressions
     /// </summary>
     public void SyncPerPoint(double sample, double value1, double value2, double x, double y)
     {
-        foreach (var name in ReadOnlyNames)
+        for (var i = 0; i < _ppReadOnly.Length; i++)
         {
-            _pp[name].Value = _pf[name].Value;
+            _ppReadOnly[i].Value = _pfReadOnly[i].Value;
         }
 
         for (var i = 0; i < PerFrameVariables.NumQVar; i++)
@@ -216,10 +225,11 @@ public sealed class WaveExpressions
         _ppIn[2].Value = value2;
         _ppOut[0].Value = x;
         _ppOut[1].Value = y;
-        _ppOut[2].Value = _pf["r"].Value;
-        _ppOut[3].Value = _pf["g"].Value;
-        _ppOut[4].Value = _pf["b"].Value;
-        _ppOut[5].Value = _pf["a"].Value;
+        // r/g/b/a 来自 per-frame VM 的 i/o（数组的 0..3 就是 r,g,b,a）
+        _ppOut[2].Value = _pfIo[0].Value;
+        _ppOut[3].Value = _pfIo[1].Value;
+        _ppOut[4].Value = _pfIo[2].Value;
+        _ppOut[5].Value = _pfIo[3].Value;
     }
 
     public void RunPerPoint() => PerPointCode?.Execute();
@@ -230,7 +240,7 @@ public sealed class WaveExpressions
 
     /// <summary>per-frame 代码写回的波形颜色/采样数（<c>samples</c> 由调用方夹到 1..512）。</summary>
     public (double R, double G, double B, double A, double Samples) ReadPerFrameOutputs()
-        => (_pf["r"].Value, _pf["g"].Value, _pf["b"].Value, _pf["a"].Value, _pf["samples"].Value);
+        => (_pfIo[0].Value, _pfIo[1].Value, _pfIo[2].Value, _pfIo[3].Value, _pfIo[4].Value);
 
     private void CopyQFrom(PerFrameVariables perFrame)
     {

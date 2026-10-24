@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 public static partial class IntrinsicFunctions
 {

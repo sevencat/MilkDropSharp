@@ -37,6 +37,78 @@ public readonly record struct WarpParams(
     float TexelOffsetY = 0f);
 
 /// <summary>
+/// warp 网格里"只跟网格坐标有关、跟运动量无关"的中间量缓存。
+/// </summary>
+/// <remarks>
+/// 64×64 网格下 <c>rad</c>/<c>ang</c> 每帧要算 4225 次 <c>sqrt</c>+<c>atan2</c>，
+/// 但只要 <c>(gridX, gridY, aspectX, aspectY)</c> 不变，结果就是同一张表 ——
+/// 窗口尺寸和网格密度都不常变，所以缓存起来每帧只付一次数组读取。
+/// </remarks>
+public sealed class WarpMeshCache
+{
+    private int _gridX = -1;
+    private int _gridY = -1;
+    private float _aspectX;
+    private float _aspectY;
+    private float[] _rad = [];
+    private float[] _ang = [];
+
+    /// <summary>每个顶点的半径（压缩空间）。</summary>
+    public ReadOnlySpan<float> Rad => _rad;
+
+    /// <summary>每个顶点的极角（网格中心为 0）。</summary>
+    public ReadOnlySpan<float> Ang => _ang;
+
+    /// <summary>缓存是否已就绪（顶点数 = <c>(gridX+1)*(gridY+1)</c>）。</summary>
+    public bool HasData(int gridX, int gridY)
+        => _rad.Length == WarpMesh.VertexCount(gridX, gridY);
+
+    /// <summary>网格参数没变就直接返回，变了才重算整张表。</summary>
+    public void Ensure(int gridX, int gridY, float aspectX, float aspectY)
+    {
+        var count = WarpMesh.VertexCount(gridX, gridY);
+        if (_rad.Length == count
+            && _gridX == gridX
+            && _gridY == gridY
+            && _aspectX.Equals(aspectX)
+            && _aspectY.Equals(aspectY))
+        {
+            return;
+        }
+
+        if (_rad.Length != count)
+        {
+            _rad = new float[count];
+            _ang = new float[count];
+        }
+
+        _gridX = gridX;
+        _gridY = gridY;
+        _aspectX = aspectX;
+        _aspectY = aspectY;
+
+        var index = 0;
+        for (var gy = 0; gy <= gridY; gy++)
+        {
+            var vy = (gy / (float)gridY * 2f) - 1f;
+            var vyA = vy * aspectY;
+
+            for (var gx = 0; gx <= gridX; gx++)
+            {
+                var vx = (gx / (float)gridX * 2f) - 1f;
+                var vxA = vx * aspectX;
+
+                _rad[index] = MathF.Sqrt((vxA * vxA) + (vyA * vyA));
+                _ang[index] = (gx == gridX / 2 && gy == gridY / 2)
+                    ? 0f
+                    : MathF.Atan2(vyA, vxA);
+                index++;
+            }
+        }
+    }
+}
+
+/// <summary>
 /// <c>ComputeGridAlphaValues</c> 的 UV 计算部分（milkdropfs.cpp:1698-1860）的移植。
 /// </summary>
 /// <remarks>
@@ -61,6 +133,9 @@ public static class WarpMesh
     /// <param name="color">顶点色（decay 就靠它的 RGB 乘到纹理上）。</param>
     /// <param name="perVertex">per-vertex 代码；非 null 时每个顶点先跑一遍再算 UV（milkdropfs.cpp:1750-1792）。</param>
     /// <param name="perFrame">per-vertex 代码的输入来源；<paramref name="perVertex"/> 有代码时必须给。</param>
+    /// <param name="cache">
+    /// <c>rad</c>/<c>ang</c> 缓存；传 null 时每次重算（等价、但慢），只用于回归测试。
+    /// </param>
     public static void Build(
         Span<MilkVertex> vertices,
         int gridX,
@@ -74,7 +149,8 @@ public static class WarpMesh
         in WarpParams p,
         uint color = 0xFFFFFFFF,
         PerVertexVariables? perVertex = null,
-        PerFrameVariables? perFrame = null)
+        PerFrameVariables? perFrame = null,
+        WarpMeshCache? cache = null)
     {
         var needed = VertexCount(gridX, gridY);
         if (vertices.Length < needed)
@@ -105,20 +181,69 @@ public static class WarpMesh
         var baseCosRot = MathF.Cos(p.Rot);
         var baseSinRot = MathF.Sin(p.Rot);
 
+        cache?.Ensure(gridX, gridY, aspectX, aspectY);
+        var useTable = cache is not null && cache.HasData(gridX, gridY);
+        var radTable = useTable ? cache!.Rad : ReadOnlySpan<float>.Empty;
+        var angTable = useTable ? cache!.Ang : ReadOnlySpan<float>.Empty;
+
+        // ---- warp 四项的相位递推准备 ----
+        // 每一项都是 sin/cos(T_k ± scaleInv * (vx*f_i ± vy*f_j))，相位是 (vx,vy) 的线性函数。
+        // 沿一行走时 vx 每次 +dx，相位增量固定，所以每行只在行首精确算一次 sin/cos，
+        // 行内用旋转递推 sin(θ+Δ)=sinθ·cosΔ+cosθ·sinΔ 推进（乘加代替三角函数）。
+        var dx = 2f / gridX;
+        var t0 = warpTime * 0.333f;
+        var t1 = warpTime * 0.375f;
+        var t2 = warpTime * 0.753f;
+        var t3 = warpTime * 0.825f;
+
+        var d1 = (double)(scaleInv * dx * f0);
+        var d2 = (double)(-scaleInv * dx * f2);
+        var d3 = (double)(-scaleInv * dx * f1);
+        var d4 = (double)(scaleInv * dx * f0);
+        var cd1 = Math.Cos(d1);
+        var sd1 = Math.Sin(d1);
+        var cd2 = Math.Cos(d2);
+        var sd2 = Math.Sin(d2);
+        var cd3 = Math.Cos(d3);
+        var sd3 = Math.Sin(d3);
+        var cd4 = Math.Cos(d4);
+        var sd4 = Math.Sin(d4);
+
+        // 没有 per-vertex 时 zoomexp 每帧是常数，ln 只算一次
+        var logZoomExpBase = hasPerVertex ? 0f : MathF.Log(p.ZoomExp);
+
         var index = 0;
         for (var gy = 0; gy <= gridY; gy++)
         {
             var vy = (gy / (float)gridY * 2f) - 1f;
+
+            // 行首（gx=0，即 vx=-1）的四个相位，每行精确算一次
+            var ph1 = t0 + (scaleInv * (-f0 - (vy * f3)));
+            var ph2 = t1 - (scaleInv * (-f2 + (vy * f1)));
+            var ph3 = t2 - (scaleInv * (-f1 - (vy * f2)));
+            var ph4 = t3 + (scaleInv * (-f0 + (vy * f3)));
+            var s1 = Math.Sin(ph1);
+            var c1 = Math.Cos(ph1);
+            var s2 = Math.Sin(ph2);
+            var c2 = Math.Cos(ph2);
+            var s3 = Math.Sin(ph3);
+            var c3 = Math.Cos(ph3);
+            var s4 = Math.Sin(ph4);
+            var c4 = Math.Cos(ph4);
 
             for (var gx = 0; gx <= gridX; gx++)
             {
                 var vx = (gx / (float)gridX * 2f) - 1f;
 
                 // 半径与角度都在"像素等比"空间里算（plugin.cpp:2289-2293）
-                var rad = MathF.Sqrt((vx * vx * aspectX * aspectX) + (vy * vy * aspectY * aspectY));
-                var ang = (gx == gridX / 2 && gy == gridY / 2)
-                    ? 0f
-                    : MathF.Atan2(vy * aspectY, vx * aspectX);
+                var rad = useTable
+                    ? radTable[index]
+                    : MathF.Sqrt((vx * vx * aspectX * aspectX) + (vy * vy * aspectY * aspectY));
+                var ang = useTable
+                    ? angTable[index]
+                    : (gx == gridX / 2 && gy == gridY / 2)
+                        ? 0f
+                        : MathF.Atan2(vy * aspectY, vx * aspectX);
 
                 // 有 per-vertex 代码时，运动量由它逐顶点改写（不回写状态）
                 var vp = hasPerVertex
@@ -135,8 +260,24 @@ public static class WarpMesh
                     warpAmp = vp.Warp * 0.0035f;
                 }
 
-                // 内置 zoom（按半径调制）
-                var zoom2 = MathF.Pow(vp.Zoom, MathF.Pow(vp.ZoomExp, (rad * 2.0f) - 1.0f));
+                // 内置 zoom（按半径调制）：
+                // zoomExp==1 时内层 pow(1, rad*2-1) 恒为 1，zoom==1 时外层也恒为 1 ——
+                // 两个默认情况都能跳过一次 pow（64×64 网格下这是每帧 8000+ 次超越函数）。
+                float zoom2;
+                if (MathF.Abs(vp.ZoomExp - 1f) < 1e-6f)
+                {
+                    zoom2 = vp.Zoom;
+                }
+                else if (MathF.Abs(vp.Zoom - 1f) < 1e-6f)
+                {
+                    zoom2 = 1f;
+                }
+                else
+                {
+                    var logZoomExp = hasPerVertex ? MathF.Log(vp.ZoomExp) : logZoomExpBase;
+                    zoom2 = MathF.Pow(vp.Zoom, MathF.Exp(((rad * 2f) - 1f) * logZoomExp));
+                }
+
                 var zoom2Inv = 1.0f / zoom2;
 
                 var u = (vx * aspectX * 0.5f * zoom2Inv) + 0.5f;
@@ -146,11 +287,11 @@ public static class WarpMesh
                 u = ((u - vp.CX) / vp.SX) + vp.CX;
                 v = ((v - vp.CY) / vp.SY) + vp.CY;
 
-                // 扭曲：四次不同相位/符号的三角项
-                u += warpAmp * MathF.Sin((warpTime * 0.333f) + (scaleInv * ((vx * f0) - (vy * f3))));
-                v += warpAmp * MathF.Cos((warpTime * 0.375f) - (scaleInv * ((vx * f2) + (vy * f1))));
-                u += warpAmp * MathF.Cos((warpTime * 0.753f) - (scaleInv * ((vx * f1) - (vy * f2))));
-                v += warpAmp * MathF.Sin((warpTime * 0.825f) + (scaleInv * ((vx * f0) + (vy * f3))));
+                // 扭曲：四次不同相位/符号的三角项（sin/cos 由行内递推给出）
+                u += warpAmp * (float)s1;
+                v += warpAmp * (float)c2;
+                u += warpAmp * (float)c3;
+                v += warpAmp * (float)s4;
 
                 // 旋转
                 var u2 = u - vp.CX;
@@ -176,6 +317,20 @@ public static class WarpMesh
                     new Vector2(u, v),
                     new Vector2((vx * 0.5f) + 0.5f + p.TexelOffsetX, (-vy * 0.5f) + 0.5f + p.TexelOffsetY),
                     new Vector2(rad, ang));
+
+                // 相位推进到下一列（递推用 double，避免 65 步后误差可见）
+                var n1 = (s1 * cd1) + (c1 * sd1);
+                c1 = (c1 * cd1) - (s1 * sd1);
+                s1 = n1;
+                var n2 = (s2 * cd2) + (c2 * sd2);
+                c2 = (c2 * cd2) - (s2 * sd2);
+                s2 = n2;
+                var n3 = (s3 * cd3) + (c3 * sd3);
+                c3 = (c3 * cd3) - (s3 * sd3);
+                s3 = n3;
+                var n4 = (s4 * cd4) + (c4 * sd4);
+                c4 = (c4 * cd4) - (s4 * sd4);
+                s4 = n4;
             }
         }
     }

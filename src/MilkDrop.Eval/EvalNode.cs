@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>
 /// 指令列表（<c>/*list*/</c>）节点使用的链表项，对应 <c>prjm_eval_exptreenode_list_item_t</c>。
@@ -23,6 +23,16 @@ public sealed class ListNode
 public sealed class EvalNode
 {
     public EvalFunc Func = null!;
+
+    /// <summary>
+    /// 对应的字节码指令。由 <see cref="CompileContext"/> 在建节点时填好，
+    /// <see cref="BytecodeCompiler"/> 据此把树降成指令；<see cref="EvalOpCode.None"/>
+    /// 表示这是手工构造的节点，只能走树解释器。
+    /// </summary>
+    internal EvalOpCode Op;
+
+    /// <summary><see cref="EvalOpCode.LoadVar"/> 的变量槽 / <see cref="EvalOpCode.LoadReg"/> 的寄存器下标。</summary>
+    internal int Slot;
 
     public EvalNode?[] Args = Array.Empty<EvalNode>();
 

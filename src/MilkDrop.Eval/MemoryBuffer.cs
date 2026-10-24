@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>内存缓冲（megabuf/gmegabuf），128 块 × 65536 个 double，按块懒分配。</summary>
 public sealed class MemoryBuffer

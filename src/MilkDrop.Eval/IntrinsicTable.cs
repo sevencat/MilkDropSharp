@@ -1,11 +1,11 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 public static partial class IntrinsicFunctions
 {
     /// <summary>内置函数表，与 C 的 <c>intrinsic_function_table</c> 一致。</summary>
     public static FunctionDef[] CreateTable()
     {
-        return new[]
+        var table = new[]
         {
             new FunctionDef("/*const*/", Const, 0, true, false),
             new FunctionDef("/*var*/", Var, 0, false, false),
@@ -87,5 +87,89 @@ public static partial class IntrinsicFunctions
             new FunctionDef("memcpy", MemCpy, 3, false, true),
             new FunctionDef("memset", MemSet, 3, false, true),
         };
+
+        foreach (var def in table)
+        {
+            def.Op = OpCodeOf(def.Name);
+        }
+
+        return table;
     }
+
+    /// <summary>规范名 → 字节码指令；返回 <see cref="EvalOpCode.None"/> 表示只能走树解释器。</summary>
+    private static EvalOpCode OpCodeOf(string name) => name switch
+    {
+        "/*const*/" => EvalOpCode.Const,
+        "/*var*/" => EvalOpCode.LoadVar,
+        "/*list*/" => EvalOpCode.List,
+        "/*or*/" => EvalOpCode.BOr,
+        "/*and*/" => EvalOpCode.BAnd,
+
+        "if" or "_if" => EvalOpCode.If,
+        "_and" => EvalOpCode.AndShort,
+        "_or" => EvalOpCode.OrShort,
+        "loop" => EvalOpCode.Loop,
+        "while" => EvalOpCode.While,
+
+        "_not" or "bnot" => EvalOpCode.BNot,
+        "_equal" or "equal" => EvalOpCode.Equal,
+        "_noteq" => EvalOpCode.NotEqual,
+        "_below" or "below" => EvalOpCode.Below,
+        "_above" or "above" => EvalOpCode.Above,
+        "_beleq" => EvalOpCode.BelowEq,
+        "_aboeq" => EvalOpCode.AboveEq,
+
+        "_set" or "assign" => EvalOpCode.Set,
+        "_add" => EvalOpCode.Add,
+        "_sub" => EvalOpCode.Sub,
+        "_mul" => EvalOpCode.Mul,
+        "_div" => EvalOpCode.Div,
+        "_mod" => EvalOpCode.Mod,
+        "_mulop" => EvalOpCode.MulOp,
+        "_divop" => EvalOpCode.DivOp,
+        "_orop" => EvalOpCode.BOrOp,
+        "_andop" => EvalOpCode.BAndOp,
+        "_addop" => EvalOpCode.AddOp,
+        "_subop" => EvalOpCode.SubOp,
+        "_modop" => EvalOpCode.ModOp,
+        "_powop" => EvalOpCode.PowOp,
+
+        "sin" => EvalOpCode.Sin,
+        "cos" => EvalOpCode.Cos,
+        "tan" => EvalOpCode.Tan,
+        "asin" => EvalOpCode.Asin,
+        "acos" => EvalOpCode.Acos,
+        "atan" => EvalOpCode.Atan,
+        "atan2" => EvalOpCode.Atan2,
+        "sqr" => EvalOpCode.Sqr,
+        "sqrt" => EvalOpCode.Sqrt,
+        "pow" => EvalOpCode.Pow,
+        "exp" => EvalOpCode.Exp,
+        "_neg" => EvalOpCode.Neg,
+
+        "log" => EvalOpCode.Log,
+        "log10" => EvalOpCode.Log10,
+        "abs" => EvalOpCode.Abs,
+        "min" => EvalOpCode.Min,
+        "max" => EvalOpCode.Max,
+        "sign" => EvalOpCode.Sign,
+        "rand" => EvalOpCode.Rand,
+        "floor" or "int" => EvalOpCode.Floor,
+        "ceil" => EvalOpCode.Ceil,
+        "invsqrt" => EvalOpCode.InvSqrt,
+        "sigmoid" => EvalOpCode.Sigmoid,
+
+        "band" => EvalOpCode.AndFunc,
+        "bor" => EvalOpCode.OrFunc,
+
+        "exec2" => EvalOpCode.Exec2,
+        "exec3" => EvalOpCode.Exec3,
+        "_mem" or "megabuf" => EvalOpCode.LoadMega,
+        "_gmem" or "gmegabuf" => EvalOpCode.LoadGMega,
+        "freembuf" => EvalOpCode.FreeMemBuf,
+        "memcpy" => EvalOpCode.MemCpy,
+        "memset" => EvalOpCode.MemSet,
+
+        _ => EvalOpCode.None,
+    };
 }

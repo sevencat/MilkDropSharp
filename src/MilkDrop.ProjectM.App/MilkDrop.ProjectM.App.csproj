@@ -4,6 +4,9 @@
     <RootNamespace>MilkDrop.ProjectM.App</RootNamespace>
     <AssemblyName>MilkDrop.ProjectM.App</AssemblyName>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+<!--    <PublishAot>true</PublishAot>-->
+    <InstructionSet>avx2</InstructionSet>
+    <ApplicationIcon>milkdropsharp.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!--
@@ -52,5 +55,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MilkDrop.ProjectM\MilkDrop.ProjectM.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="milkdropsharp.ico" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>词法单元类型，对应 C 版 bison token 枚举（Scanner.l 返回的种类）。</summary>
 internal enum TokenType

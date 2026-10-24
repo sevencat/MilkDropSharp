@@ -87,8 +87,11 @@ public sealed class D3D9RenderBackend : IRenderBackend
 {
     private readonly D3D9Context _context;
 
-    /// <summary>逐行绘制 warp 网格时复用的顶点缓冲（避免每帧分配）。</summary>
-    private MilkVertex[] _warpRowScratch = [];
+    /// <summary>
+    /// 像素坐标 → 裁剪空间的临时缓冲（warp 网格逐行绘制与逐批绘制共用，避免每帧分配）。
+    /// 两处不会嵌套使用，所以共用同一块即可。
+    /// </summary>
+    private MilkVertex[] _scratch = [];
 
     public D3D9RenderBackend(D3D9Context context) => _context = context;
 
@@ -227,8 +230,8 @@ public sealed class D3D9RenderBackend : IRenderBackend
     /// </summary>
     /// <remarks>
     /// UV 已经在 <c>WarpMesh</c> 里算好，这里只负责像素坐标 → 裁剪空间。
-    /// 每行一次 <c>DrawPrimitiveUP</c> 是有意的：网格只有 64x64，
-    /// 换 index buffer 反而要多维护一份索引。
+    /// 网格索引只在 <c>(gridX, gridY)</c> 变化时重建，之后每帧一次
+    /// <c>DrawIndexedPrimitive</c> 画完整张网格。
     /// </remarks>
     public void DrawWarpGrid(ReadOnlySpan<MilkVertex> vertices, int gridX, int gridY, ITexture? texture, BlendMode blend, bool bindTexture = true)
     {
@@ -249,13 +252,16 @@ public sealed class D3D9RenderBackend : IRenderBackend
             BindTexture(texture);
         }
 
+        // 逐行一次 DrawPrimitiveUP（64 行 = 64 次驱动调用，但每次只有 130 个顶点）。
+        // 试过整张网格的 VB+IB + 一次 DrawIndexedPrimitive：D3D9 下每帧 Lock(Discard) 169KB
+        // 反而更贵（实测引擎 CPU 从 1.18 ms 涨到 2.30 ms），所以保留 UP 路径。
         var rowLength = (gridX + 1) * 2;
-        if (_warpRowScratch.Length < rowLength)
+        if (_scratch.Length < rowLength)
         {
-            _warpRowScratch = new MilkVertex[rowLength];
+            _scratch = new MilkVertex[rowLength];
         }
 
-        var row = _warpRowScratch.AsSpan(0, rowLength);
+        var row = _scratch.AsSpan(0, rowLength);
         var w = Width;
         var h = Height;
 
@@ -475,10 +481,16 @@ public sealed class D3D9RenderBackend : IRenderBackend
     /// <summary>把像素坐标顶点转成裁剪空间后绘制。</summary>
     private void DrawPixelSpacePrimitive(PrimitiveType primitiveType, ReadOnlySpan<MilkVertex> source, uint primitiveCount)
     {
-        // 注：M4 之后这里会换成预分配的持久缓冲区（避免每帧分配）。
         var w = Width;
         var h = Height;
-        var scratch = new MilkVertex[source.Length];
+
+        // 波形/shape 每帧要画很多批，每批都 new 一个数组会持续喂 GC，这里复用同一个缓冲。
+        if (_scratch.Length < source.Length)
+        {
+            _scratch = new MilkVertex[source.Length];
+        }
+
+        var scratch = _scratch.AsSpan(0, source.Length);
 
         for (var i = 0; i < source.Length; i++)
         {

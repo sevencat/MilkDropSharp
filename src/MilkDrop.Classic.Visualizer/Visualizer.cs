@@ -95,6 +95,9 @@ public sealed class VisualizerEngine : IDisposable
     private MilkVertex[] _warpMesh = [];
     private readonly MilkVertex[] _compMesh = new MilkVertex[CompMesh.VertexCount];
 
+    /// <summary>warp 网格的 <c>rad</c>/<c>ang</c> 缓存（网格尺寸与窗口宽高不变时复用）。</summary>
+    private readonly WarpMeshCache _warpCache = new();
+
     // 自定义波形顶点缓冲（对应 milkdropfs.cpp 里 DrawCustomWaves 的栈上 v[1024]/v2[2048]）。
     private readonly MilkVertex[] _waveVertices = new MilkVertex[WaveGeometry.MaxSamples];
     private readonly MilkVertex[] _waveSmoothed = new MilkVertex[WaveGeometry.MaxVertices];
@@ -135,6 +138,9 @@ public sealed class VisualizerEngine : IDisposable
     private ITexture? _fftTexture;
     private float _fftPeak = 1f;
     private bool _fftUnavailable;
+
+    /// <summary>当前预设 shader 是否采样 <c>sampler_fft</c>（决定要不要每帧上传频谱纹理）。</summary>
+    private bool _fftSamplerUsed;
 
     // ---- blur 链（原版 m_lpBlur[6]：blur1..3 各占一对水平/垂直 RT）----
     private IShaderProgram? _blurVertexShader;
@@ -605,6 +611,9 @@ public sealed class VisualizerEngine : IDisposable
         _randFrame = new Vector4(Frand(), Frand(), Frand(), Frand());
         EnsurePresetShaders(preset);
         EnsureNoiseTextures();
+
+        // 只有预设 shader 真的采 sampler_fft 才需要每帧上传频谱（兼容层默认开，但绝大多数预设不用）
+        _fftSamplerUsed = UsesSampler(_presetWarpShader, "fft") || UsesSampler(_presetCompShader, "fft");
         UpdateFftTexture();
 
         if (_blurLevelsUsed > 0)
@@ -642,7 +651,8 @@ public sealed class VisualizerEngine : IDisposable
             WarpMesh.FromState(preset, Time, _backend.Width, _backend.Height),
             decayColor,
             preset.PerVertex,
-            preset.PerFrame);
+            preset.PerFrame,
+            _warpCache);
 
         var sizes = new ShaderTextureSizes(
             _backend.Width,
@@ -932,6 +942,25 @@ public sealed class VisualizerEngine : IDisposable
     }
 
     /// <summary>去掉 <c>XY_</c> 前缀之后的根名是否就是内置噪点纹理。</summary>
+    /// <summary>shader 的采样器名里有没有包含给定关键字（与 <see cref="ResolveSamplerTexture"/> 同一套匹配规则）。</summary>
+    private static bool UsesSampler(IShaderProgram? program, string keyword)
+    {
+        if (program is null)
+        {
+            return false;
+        }
+
+        foreach (var name in program.SamplerNames)
+        {
+            if (name.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private ITexture? ResolveNoiseAlias(string rootName) => rootName.ToLowerInvariant() switch
     {
         "noise_lq" => _noiseLq,
@@ -1057,7 +1086,7 @@ public sealed class VisualizerEngine : IDisposable
     /// </remarks>
     private void UpdateFftTexture()
     {
-        if (!_shaderCompat || _fftUnavailable)
+        if (!_shaderCompat || _fftUnavailable || !_fftSamplerUsed)
         {
             return;
         }

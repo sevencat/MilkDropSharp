@@ -39,6 +39,9 @@ public sealed class PerVertexVariables
     private readonly IEelVariable _vAng;
     private readonly IEelVariable[] _warpIo = new IEelVariable[PerFrameVariables.WarpIoOrder.Length];
 
+    /// <summary>per-frame → per-vertex 的 10 个量在这里中转（原来是每顶点 stackalloc，每帧 4k+ 次清零）。</summary>
+    private readonly double[] _ioBuffer = new double[PerFrameVariables.WarpIoOrder.Length];
+
     private const int IoZoom = 0;
     private const int IoZoomExp = 1;
     private const int IoRot = 2;
@@ -152,7 +155,7 @@ public sealed class PerVertexVariables
         _vAng.Value = ang;
 
         // 每个顶点重新灌入 per-frame 的结果（milkdropfs.cpp:1760-1769）
-        Span<double> io = stackalloc double[PerFrameVariables.WarpIoOrder.Length];
+        var io = _ioBuffer;
         perFrame.ReadWarpIo(io);
         for (var i = 0; i < io.Length; i++)
         {
@@ -175,4 +178,6 @@ public sealed class PerVertexVariables
             SY = (float)_warpIo[IoSy].Value,
         };
     }
+
+
 }

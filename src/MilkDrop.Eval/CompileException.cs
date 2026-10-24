@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>
 /// 编译期错误，对应 C 里写入 <c>prjm_eval_compiler_error_t</c> 的信息。

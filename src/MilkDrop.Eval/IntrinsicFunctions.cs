@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>内置函数库，对应 <c>TreeFunctions.c</c>。拆分为多个 partial 文件。</summary>
 public static partial class IntrinsicFunctions
@@ -25,7 +25,7 @@ public static partial class IntrinsicFunctions
     }
 
     /// <summary>MilkDrop 原始 Mersenne-Twister（MT19937），种子 0x4141f00d。</summary>
-    private static class Mt
+    internal static class Mt
     {
         private const int N = 624;
         private const int M = 397;

@@ -30,13 +30,18 @@ public sealed class ShapeExpressions
     private readonly IEelVariable[] _q = new IEelVariable[PerFrameVariables.NumQVar];
     private readonly IEelVariable[] _t = new IEelVariable[NumTVar];
 
+    /// <summary>热路径（每个实例的绘制都要同步一遍）按名字表顺序预绑定，避免字典查找。</summary>
+    private readonly IEelVariable[] _readOnly = new IEelVariable[ReadOnlyNames.Length];
+    private readonly IEelVariable[] _io = new IEelVariable[IoNames.Length];
+
     public ShapeExpressions(IExpressionEngine engine, int index)
     {
         Vm = engine.CreateVm($"shape{index}_per_frame");
 
-        foreach (var name in ReadOnlyNames)
+        for (var i = 0; i < ReadOnlyNames.Length; i++)
         {
-            _byName[name] = Vm.RegisterVariable(name);
+            var name = ReadOnlyNames[i];
+            _byName[name] = _readOnly[i] = Vm.RegisterVariable(name);
         }
 
         for (var i = 0; i < PerFrameVariables.NumQVar; i++)
@@ -49,9 +54,10 @@ public sealed class ShapeExpressions
             _t[i] = _byName[$"t{i + 1}"] = Vm.RegisterVariable($"t{i + 1}");
         }
 
-        foreach (var name in IoNames)
+        for (var i = 0; i < IoNames.Length; i++)
         {
-            _byName[name] = Vm.RegisterVariable(name);
+            var name = IoNames[i];
+            _byName[name] = _io[i] = Vm.RegisterVariable(name);
         }
     }
 
@@ -115,16 +121,16 @@ public sealed class ShapeExpressions
     /// </summary>
     public void SyncPerFrame(in PerFrameContext ctx, PerFrameVariables perFrame, PresetShape shape, int instance)
     {
-        _byName["time"].Value = ctx.Time;
-        _byName["fps"].Value = ctx.Fps;
-        _byName["frame"].Value = ctx.Frame;
-        _byName["progress"].Value = ctx.Progress;
-        _byName["bass"].Value = ctx.MySound.ImmRel[0];
-        _byName["mid"].Value = ctx.MySound.ImmRel[1];
-        _byName["treb"].Value = ctx.MySound.ImmRel[2];
-        _byName["bass_att"].Value = ctx.MySound.AvgRel[0];
-        _byName["mid_att"].Value = ctx.MySound.AvgRel[1];
-        _byName["treb_att"].Value = ctx.MySound.AvgRel[2];
+        _readOnly[0].Value = ctx.Time;
+        _readOnly[1].Value = ctx.Fps;
+        _readOnly[2].Value = ctx.Frame;
+        _readOnly[3].Value = ctx.Progress;
+        _readOnly[4].Value = ctx.MySound.ImmRel[0];
+        _readOnly[5].Value = ctx.MySound.ImmRel[1];
+        _readOnly[6].Value = ctx.MySound.ImmRel[2];
+        _readOnly[7].Value = ctx.MySound.AvgRel[0];
+        _readOnly[8].Value = ctx.MySound.AvgRel[1];
+        _readOnly[9].Value = ctx.MySound.AvgRel[2];
 
         CopyQFrom(perFrame);
         for (var i = 0; i < NumTVar; i++)
@@ -132,30 +138,32 @@ public sealed class ShapeExpressions
             _t[i].Value = TValuesAfterInitCode[i];
         }
 
-        _byName["x"].Value = shape.X;
-        _byName["y"].Value = shape.Y;
-        _byName["rad"].Value = shape.Rad;
-        _byName["ang"].Value = shape.Ang;
-        _byName["tex_ang"].Value = shape.TexAng;
-        _byName["tex_zoom"].Value = shape.TexZoom;
-        _byName["sides"].Value = shape.Sides;
-        _byName["textured"].Value = shape.Textured;
-        _byName["num_inst"].Value = shape.Instances;
-        _byName["instance"].Value = instance;
-        _byName["additive"].Value = shape.Additive;
-        _byName["thick"].Value = shape.ThickOutline;
-        _byName["r"].Value = shape.R;
-        _byName["g"].Value = shape.G;
-        _byName["b"].Value = shape.B;
-        _byName["a"].Value = shape.A;
-        _byName["r2"].Value = shape.R2;
-        _byName["g2"].Value = shape.G2;
-        _byName["b2"].Value = shape.B2;
-        _byName["a2"].Value = shape.A2;
-        _byName["border_r"].Value = shape.BorderR;
-        _byName["border_g"].Value = shape.BorderG;
-        _byName["border_b"].Value = shape.BorderB;
-        _byName["border_a"].Value = shape.BorderA;
+        // 顺序见 IoNames：x, y, rad, ang, tex_ang, tex_zoom, sides, textured, instance, num_inst,
+        // additive, thick, r, g, b, a, r2, g2, b2, a2, border_r, border_g, border_b, border_a
+        _io[0].Value = shape.X;
+        _io[1].Value = shape.Y;
+        _io[2].Value = shape.Rad;
+        _io[3].Value = shape.Ang;
+        _io[4].Value = shape.TexAng;
+        _io[5].Value = shape.TexZoom;
+        _io[6].Value = shape.Sides;
+        _io[7].Value = shape.Textured;
+        _io[8].Value = instance;
+        _io[9].Value = shape.Instances;
+        _io[10].Value = shape.Additive;
+        _io[11].Value = shape.ThickOutline;
+        _io[12].Value = shape.R;
+        _io[13].Value = shape.G;
+        _io[14].Value = shape.B;
+        _io[15].Value = shape.A;
+        _io[16].Value = shape.R2;
+        _io[17].Value = shape.G2;
+        _io[18].Value = shape.B2;
+        _io[19].Value = shape.A2;
+        _io[20].Value = shape.BorderR;
+        _io[21].Value = shape.BorderG;
+        _io[22].Value = shape.BorderB;
+        _io[23].Value = shape.BorderA;
     }
 
     public void RunPerFrame() => PerFrameCode?.Execute();

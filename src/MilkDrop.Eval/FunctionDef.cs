@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>
 /// 表达式树节点的求值函数签名，等价于 C 里的
@@ -16,6 +16,9 @@ public sealed class FunctionDef
     public int ArgCount;
     public bool IsConstEval;
     public bool IsStateChanging;
+
+    /// <summary>对应的字节码指令；由 <see cref="IntrinsicFunctions.CreateTable"/> 按名字填好。</summary>
+    internal EvalOpCode Op;
 
     public FunctionDef(string name, EvalFunc func, int argCount, bool isConstEval, bool isStateChanging)
     {

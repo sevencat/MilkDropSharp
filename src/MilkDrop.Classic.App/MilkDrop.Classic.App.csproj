@@ -10,6 +10,7 @@
       （RuntimeIdentifiers 只声明可选 RID，不写死，这样日常 dotnet build 仍然是 RID 无关的。）
     -->
     <PublishAot>true</PublishAot>
+    <InstructionSet>avx2</InstructionSet>
     <IsAotCompatible>true</IsAotCompatible>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <!-- Vortice.Direct3D9 的 COM 调用在 AOT 下走内建 COM 互操作，不走运行时动态封送 -->
@@ -28,6 +29,7 @@
                       仅在 single-file 场景失效；本项目不发布 single-file
     -->
     <NoWarn>$(NoWarn);IL2104;IL2072;IL3000;IL3002</NoWarn>
+    <ApplicationIcon>milkdropsharp.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <!--
@@ -50,5 +52,8 @@
     <ProjectReference Include="..\MilkDrop.Eval\MilkDrop.Eval.csproj" />
     <ProjectReference Include="..\MilkDrop.Classic.Render.D3D9\MilkDrop.Classic.Render.D3D9.csproj" />
     <ProjectReference Include="..\MilkDrop.Classic.Visualizer\MilkDrop.Classic.Visualizer.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="milkdropsharp.ico" />
   </ItemGroup>
 </Project>

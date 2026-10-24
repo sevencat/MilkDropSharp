@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>
 /// 手写解析器，等价移植 <c>Compiler.y</c> 的文法与优先级。

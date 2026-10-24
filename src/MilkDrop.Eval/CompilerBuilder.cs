@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>
 /// 编译器节点工厂，移植 <c>CompilerFunctions.c</c> 中的
@@ -105,7 +105,7 @@ internal sealed class CompilerBuilder
                 return instruction;
             }
 
-            var listTree = new EvalNode { Func = _listFunc.Func };
+            var listTree = new EvalNode { Func = _listFunc.Func, Op = EvalOpCode.List };
             listTree.List = new ListNode { Expr = list.TreeNode!, Next = null };
 
             var newList = new CompilerNode

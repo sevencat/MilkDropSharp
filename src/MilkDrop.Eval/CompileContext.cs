@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>
 /// 编译/执行上下文，对应 <c>prjm_eval_compiler_context_t</c>。
@@ -10,6 +10,16 @@ public sealed class CompileContext
 
     private readonly Dictionary<string, FunctionDef> _functions;
     private readonly Dictionary<string, Variable> _variables;
+
+    /// <summary>
+    /// 变量值的连续存储（<c>Variable</c> 只是它的句柄）。字节码 VM 直接按下标读写，
+    /// 比逐对象访问缓存友好得多。扩容时会把已有变量重新指向新数组。
+    /// </summary>
+    private double[] _slots = new double[64];
+    private int _slotCount;
+
+    /// <summary>变量槽存储；供 <see cref="EvalVm"/> 使用。</summary>
+    internal double[] Slots => _slots;
 
     /// <summary>全局内存（gmegabuf），所有上下文共享，对应 C 里的 static_global_memory。</summary>
     public static MemoryBuffer GlobalMemory => _globalMemory ??= new MemoryBuffer();
@@ -60,17 +70,34 @@ public sealed class CompileContext
         {
             return existing;
         }
-        var variable = new Variable(name);
+        if (_slotCount == _slots.Length)
+        {
+            GrowSlots();
+        }
+
+        var variable = new Variable(name, _slots, _slotCount);
+        _slotCount++;
         _variables[name] = variable;
         return variable;
     }
 
-    public void ResetVariables()
+    /// <summary>槽位数组扩容；已有变量句柄要重新指向新数组，否则读写会落到旧数组上。</summary>
+    private void GrowSlots()
     {
+        var slots = new double[_slots.Length * 2];
+        Array.Copy(_slots, slots, _slotCount);
+
         foreach (var variable in _variables.Values)
         {
-            variable.Value = 0.0;
+            variable.Storage = slots;
         }
+
+        _slots = slots;
+    }
+
+    public void ResetVariables()
+    {
+        Array.Clear(_slots, 0, _slotCount);
     }
 
     /// <summary>
@@ -86,7 +113,15 @@ public sealed class CompileContext
     internal EvalNode VariableNode(VariableReference slot)
         => slot.IsRegister
             ? RegisterRef(slot.Index)
-            : new EvalNode { Func = FuncOf("/*var*/"), Var = slot.Variable };
+            : new EvalNode
+            {
+                Func = FuncOf("/*var*/"),
+                Op = EvalOpCode.LoadVar,
+                Slot = slot.Variable!.Slot,
+                Var = slot.Variable,
+                RefArray = slot.Variable.Storage,
+                RefIndex = slot.Variable.Slot,
+            };
 
     /// <summary>判断名字是否为 <c>regNN</c> 形式（5 个字符，前 3 个为 "reg"，后两位为数字）。</summary>
     private static bool TryParseRegisterIndex(string name, out int index)
@@ -108,11 +143,32 @@ public sealed class CompileContext
 
     private EvalFunc FuncOf(string name) => _functions[name].Func;
 
-    public EvalNode Constant(double value) => new() { Func = FuncOf("/*const*/"), Value = value };
+    public EvalNode Constant(double value)
+        => new() { Func = FuncOf("/*const*/"), Op = EvalOpCode.Const, Value = value };
 
-    public EvalNode VariableRef(string name) => new() { Func = FuncOf("/*var*/"), Var = GetOrCreateVariable(name) };
+    public EvalNode VariableRef(string name)
+    {
+        var variable = GetOrCreateVariable(name);
+        return new EvalNode
+        {
+            Func = FuncOf("/*var*/"),
+            Op = EvalOpCode.LoadVar,
+            Slot = variable.Slot,
+            Var = variable,
+            RefArray = variable.Storage,
+            RefIndex = variable.Slot,
+        };
+    }
 
-    public EvalNode RegisterRef(int index) => new() { Func = FuncOf("/*var*/"), RefArray = GlobalRegisters, RefIndex = index };
+    public EvalNode RegisterRef(int index)
+        => new()
+        {
+            Func = FuncOf("/*var*/"),
+            Op = EvalOpCode.LoadReg,
+            Slot = index,
+            RefArray = GlobalRegisters,
+            RefIndex = index,
+        };
 
     /// <summary>构建函数调用节点，自动为内存访问函数绑定本地/全局内存。</summary>
     public EvalNode Call(string name, params EvalNode[] args) => Call(_functions[name], args);
@@ -120,7 +176,7 @@ public sealed class CompileContext
     /// <summary>按函数定义构建调用节点；内存绑定使用函数表中的规范名，避免大小写问题。</summary>
     public EvalNode Call(FunctionDef function, params EvalNode[] args)
     {
-        var node = new EvalNode { Func = function.Func, Args = args };
+        var node = new EvalNode { Func = function.Func, Op = function.Op, Args = args };
         node.Memory = function.Name switch
         {
             "_gmem" or "gmegabuf" => GlobalMemory,
@@ -133,7 +189,7 @@ public sealed class CompileContext
     /// <summary>构建指令列表（<c>/*list*/</c>）节点。</summary>
     public EvalNode List(params EvalNode[] exprs)
     {
-        var node = new EvalNode { Func = FuncOf("/*list*/") };
+        var node = new EvalNode { Func = FuncOf("/*list*/"), Op = EvalOpCode.List };
         ListNode? head = null;
         for (int i = exprs.Length - 1; i >= 0; i--)
         {

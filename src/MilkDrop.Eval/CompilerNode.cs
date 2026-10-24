@@ -1,4 +1,4 @@
-namespace ProjectMEvalSharp;
+namespace MilkDrop.Eval;
 
 /// <summary>编译期节点类型，对应 <c>prjm_eval_compiler_node_type_t</c>。</summary>
 internal enum CompilerNodeType
