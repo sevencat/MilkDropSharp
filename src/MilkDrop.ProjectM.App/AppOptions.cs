@@ -11,6 +11,9 @@ public sealed class AppOptions
 
     public bool VSync { get; private set; } = true;
 
+    /// <summary>启动即进全屏（运行中可用 F11 切换）。</summary>
+    public bool Fullscreen { get; private set; }
+
     /// <summary>界面缩放倍数（0 = 按窗口 DPI 自动推断）。</summary>
     public float UiScale { get; private set; }
 
@@ -77,6 +80,9 @@ public sealed class AppOptions
     /// <summary>每隔 N 帧自动换下一个预设（0 = 关闭；无人值守验证软切路径用）。</summary>
     public int AutoNextFrames { get; private set; }
 
+    /// <summary>固定时间步长（秒）；0 = 用真实时钟（批量跑与 AOT/JIT 对比用）。</summary>
+    public double FixedTimeStep { get; private set; }
+
     // ---- P9：批量验证 ----
 
     /// <summary>批量跑模式：扫描所有预设，逐个渲染 N 帧并出报告。</summary>
@@ -116,6 +122,9 @@ public sealed class AppOptions
                     break;
                 case "--novsync":
                     options.VSync = false;
+                    break;
+                case "--fullscreen":
+                    options.Fullscreen = true;
                     break;
                 case "--vsync":
                     options.VSync = true;
@@ -192,6 +201,9 @@ public sealed class AppOptions
                 case "--auto-next":
                     options.AutoNextFrames = ReadInt(args, ref i, 0);
                     break;
+                case "--fixed-dt":
+                    options.FixedTimeStep = ReadDouble(args, ref i);
+                    break;
 
                 case "--bench":
                     options.Bench = true;
@@ -237,6 +249,7 @@ public sealed class AppOptions
               --height N            窗口高度（默认 768）
               --ui-scale F          ImGui 缩放倍数（默认按 DPI 推断）
               --novsync             关闭垂直同步
+             --fullscreen          启动即全屏（运行中 F11 切换）
               --no-ui               不建 ImGui 界面（纯画面）
               --font-check          只检查中文字体字形覆盖（不建窗口），有缺字返回 1
 
@@ -263,6 +276,7 @@ public sealed class AppOptions
               --shot FILE           退出前把最后一帧存成 PNG
               --shot-every N        每 N 帧存一张 PNG（文件名自动编号）
               --auto-next N         每 N 帧自动切到下一个预设（走软切路径）
+              --fixed-dt S          固定时间步长（秒，如 0.0166667），用于可复现截图对比
               --bench               批量跑：逐个预设渲染 --bench-frames 帧并出报告
               --bench-frames N      每个预设渲染帧数（默认 10）
               --bench-limit N       只跑前 N 个预设（0 = 全部）
@@ -276,7 +290,7 @@ public sealed class AppOptions
             快捷键（窗口有焦点时）
               Space 暂停/继续     N / →  下一个      P / ←  上一个
               R 随机              L 锁定当前      S 截图
-              F 显示/隐藏界面     H 帮助          Esc / Q 退出
+              F 显示/隐藏界面     F11 全屏/窗口   H 帮助          Esc / Q 退出
             """);
     }
 

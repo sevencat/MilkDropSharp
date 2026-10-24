@@ -12,6 +12,7 @@ internal enum HotkeyCommand
     ToggleLock,
     Screenshot,
     ToggleUi,
+    ToggleFullscreen,
     ToggleHelp,
     Quit,
 }
@@ -74,6 +75,9 @@ internal sealed class Hotkeys : IDisposable
                 break;
             case Key.F:
                 Triggered?.Invoke(HotkeyCommand.ToggleUi);
+                break;
+            case Key.F11:
+                Triggered?.Invoke(HotkeyCommand.ToggleFullscreen);
                 break;
             case Key.H:
                 Triggered?.Invoke(HotkeyCommand.ToggleHelp);

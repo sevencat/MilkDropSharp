@@ -26,9 +26,11 @@ public sealed class MilkdropStaticShaders
 {
     private const string ResourcePrefix = "MilkDrop.ProjectM.MilkdropPreset.Shaders.";
 
-    private static MilkdropStaticShaders? _instance;
+    private static readonly Lazy<MilkdropStaticShaders> LazyInstance =
+        new(() => new MilkdropStaticShaders(), LazyThreadSafetyMode.ExecutionAndPublication);
 
-    private readonly Dictionary<string, string> _cache = new(StringComparer.Ordinal);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _cache =
+        new(StringComparer.Ordinal);
 
     private MilkdropStaticShaders()
     {
@@ -37,7 +39,12 @@ public sealed class MilkdropStaticShaders
     }
 
     /// <summary>返回单例（对应 <c>MilkdropStaticShaders::Get()</c>）。</summary>
-    public static MilkdropStaticShaders Get() => _instance ??= new MilkdropStaticShaders();
+    /// <remarks>
+    /// 用 <see cref="Lazy{T}"/> 而不是 <c>??=</c>：并发首次访问可能建出两个实例，
+    /// 而下面那个普通 <see cref="Dictionary{TKey,TValue}"/> 缓存被多线程同时写会抛
+    /// <see cref="InvalidOperationException"/>（或读出半成品），表现为随机的 "HLSL parsing failed"。
+    /// </remarks>
+    public static MilkdropStaticShaders Get() => LazyInstance.Value;
 
     /// <summary>拼在 <c>.vert</c>/<c>.frag</c> 前的版本行。</summary>
     public string VersionHeader { get; }

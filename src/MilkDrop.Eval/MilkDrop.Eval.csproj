@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>MilkDrop.Eval</RootNamespace>
+    <!-- P10：本库是纯解释执行（无 Reflection.Emit），标注 AOT 兼容让分析器守住这条线 -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
     <!-- ProjectMEvalSharp（projectm-eval 的托管移植）源码已并入本库，不再引用外部工程 -->

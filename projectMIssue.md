@@ -343,6 +343,15 @@ P7 补的是**淘汰联动**：I-30 的 `TryUpdate` + 描述符弱引用。测�
 
 ## P9（验证打磨）阶段
 
+### I-41 批量跑必须喂"合成音频"，否则会把"没声音"误判成"渲染坏了"
+
+- **现象**：第一轮 bench（`--no-audio`，10 帧）统计出 663 个 `non_black_ratio < 1%` 的预设，
+  看上去像大片黑屏。
+- **原因**：两个叠加因素——(1) 很多预设的亮度/颜色直接由 `bass/mid/treb` 驱动，无音频时全程为 0；
+  (2) 10 帧（≈0.17 秒）对"warp 反馈慢慢累积"的预设远远不够。
+- **结论**：新增 `--synthetic-audio`（440 Hz + 每 0.5 秒一次低频脉冲）与 `--bench-list` 复测。
+  663 个里 329 个在 60 帧 + 合成音后出图；剩余的需要更长演化时间，属"慢热"而非 bug。
+
 ### I-40 高 DPI 下不能靠"OnLoad 里改 window.Size"来放大窗口
 
 - **现象**：1.75x DPI 的机器上，界面只铺满左上角一块、其余是白的，截图尺寸也对不上。
@@ -363,7 +372,58 @@ P7 补的是**淘汰联动**：I-30 的 `TryUpdate` + 描述符弱引用。测�
 
 ---
 
+## P10（Native AOT）阶段
+
+### I-42 Silk.NET 在 AOT 下找不到窗口平台
+
+- **现象**：AOT exe 启动即崩：`PlatformNotSupportedException: Couldn't find a suitable window platform (none registered)`。
+- **原因**：`Silk.NET.Windowing` 默认按 assembly 名**反射加载**后端（`Silk.NET.Windowing.Glfw`），
+  NativeAOT 裁剪后该 assembly 不可达。
+- **结论**：`Program.Main` 里显式 `Window.PrioritizeGlfw()`，并在 `PublishAot` 条件下用
+  `<TrimmerRootAssembly Include="Silk.NET.Windowing.Glfw"/>` / `Silk.NET.Input.Glfw` 根住。
+
+### I-43 NAudio 的 WASAPI 在 NativeAOT 下不可用
+
+- **现象**：ILC 报 `Method 'NAudio.CoreAudioApi.Interfaces.MMDeviceEnumeratorComObject..ctor()' will always throw
+  because: Invalid IL or CLR metadata`；运行期构造 `WasapiLoopbackCapture` 抛 `InvalidProgram_Specific`。
+- **原因**：NAudio 用经典 COM interop（`Marshal.GetTypeFromCLSID` + RCW），NativeAOT 不支持动态 COM 激活。
+- **结论**：`AudioCapture` 构造失败时降级为静音并打日志（AOT 版仍可渲染）。
+  需要录音时用 JIT 版，或把 WASAPI 换成 `[GeneratedComInterface]` 手写封装（P10 待办，不影响出图）。
+
+### I-44 没有固定时间步长就没法做像素级 A/B
+
+- **现象**：同一预设、同样 240 帧，JIT 与 AOT 的截图平均差异 56/255，看起来毫无关系。
+- **原因**：`time` 来自真实时钟，两次运行耗时不同（3.9s vs 2.3s），"第 240 帧"对应的模拟时间不一样。
+- **结论**：`TimeKeeper.FixedTimeStep` + `--fixed-dt`，批量跑默认 1/60。
+  固定后同一对截图的平均差异降到 **0.89/255**（剩下的是 `rand_frame`/`rand_preset` 与浮点累加）。
+  要做逐位一致，还需要再补一个 `--seed`（当前未实现，作为可选项记录）。
+
+---
+
 ## 通用（跨阶段）
+
+### I-45 Q 变量扩到 64 的实现要点
+
+- **只改三处**：`Constants.QVarCount` 32→64、`PresetShaderHeaderGlsl330.inc` 加 `_qi.._qp` 声明与 `q33..q64` 的
+  `#define`、其余代码（`PerFrameContext`/`PerPixelContext`/`PerPixelMesh`/`MilkdropShader`）本来就按
+  `QVarCount` 循环，uniform 名用 `"_q" + (char)('a' + i/4)` 生成，自动扩到 `_qp`。
+- **必须注意**：`PresetShaderHeaderGlsl330.inc` 会被 HlslParser 当源码解析，**注释里不能出现非 ASCII**，
+  否则报 "HLSL parsing failed"（排查时踩到过一次，错误信息只会打印整个 source，不指出行号）。
+- **验证**：`q33`/`q64` 写进 per_frame 能驱动 comp shader 输出（新增测试）；
+  抽 200 个预设跑 bench，加载失败仍是原来那 4 个预设自身语法损坏的，GL error 0。
+
+### I-46 测试偶发 "HLSL parsing failed" 的真正原因
+
+- **现象**：连跑 `dotnet test` 偶尔 1–3 个 `MilkdropShaderTranslationTests` 失败，重跑又全绿。
+- **根因**：`MilkdropStaticShaders.Get()` 用 `_instance ??= new(...)` + 普通 `Dictionary` 缓存。
+  xunit 并行下两个线程同时首次取单例／同时写缓存，会建出两个实例或让 `Dictionary` 抛/读半成品，
+  拼出来的 shader 源码就是坏的。给 `HlslToGlslTranslator.Translate` 加锁并不能解决，因为状态不在这里。
+- **修复**：
+  1. `MilkdropStaticShaders` 改成 `Lazy<T>(ExecutionAndPublication)` + `ConcurrentDictionary`；
+  2. `HlslToGlslTranslator.Translate` 仍加静态锁（C++ 移植过来的静态表本来也不是线程安全的）；
+  3. 测试程序集 `[assembly: CollectionBehavior(DisableTestParallelization = true)]`——
+     这批测试共用进程级 `GlContext`，本来就不该并行（3s → 5s）。
+- **结果**：连跑 5 次全绿。
 
 ### I-33 预设类名与命名空间同名
 

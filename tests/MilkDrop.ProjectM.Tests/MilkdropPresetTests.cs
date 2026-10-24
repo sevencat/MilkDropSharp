@@ -250,6 +250,43 @@ public sealed class MilkdropPresetRenderTests(OffscreenGlFixture gl) : IDisposab
         Assert.True(r > 100, $"形状中心应为红色: {r},{g},{b}");
     }
 
+    /// <summary>
+    /// 扩展的 q33..q64 既能在 per-frame 代码里赋值，也能传到 shader 里（表现为画面颜色）。
+    /// </summary>
+    [Fact]
+    public void RenderFrame_ExtendedQVariablesReachShader()
+    {
+        if (!gl.TryMakeCurrent())
+        {
+            return;
+        }
+
+        const string preset = """
+            [preset00]
+            MILKDROP_PRESET_VERSION=201
+            PSVERSION_WARP=2
+            PSVERSION_COMP=2
+            per_frame_1=q33 = 1.0;
+            per_frame_2=q64 = 0.5;
+            comp_1=`shader_body { ret = float3(q33, 0.0, q64); }
+            """;
+
+        using TextureManager textureManager = new([_textureDir]);
+        using var presetInstance = CreatePreset(preset);
+        RenderContext renderContext = CreateRenderContext(textureManager);
+
+        presetInstance.Initialize(renderContext);
+        RenderFrames(presetInstance, renderContext, 2);
+
+        Assert.Equal(GLEnum.NoError, gl.Gl.GetError());
+
+        (byte r, byte g, byte b, byte _) = ReadPixel(presetInstance.OutputTexture(), Width / 2, Height / 2);
+
+        Assert.True(r > 200, $"q33 应驱动红通道: r={r}");
+        Assert.True(g < 32, $"绿通道应为 0: g={g}");
+        Assert.InRange(b, 100, 160);
+    }
+
     private static MilkdropPresetType CreatePreset(string presetText)
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(presetText));

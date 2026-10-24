@@ -101,12 +101,18 @@ internal static class Program
             API = GraphicsAPI.None,
             Size = new Vector2D<int>(options.Width, options.Height),
             Title = "MilkDrop.ProjectM (C# port) — Silk.NET + ANGLE/GLES3 + ImGui",
+            // 全屏在建窗口时就定好：EGL surface 按客户区定型，事后改尺寸要多绕一圈。
+            WindowState = options.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
             VSync = false,
             PreferredDepthBufferBits = 0,
             PreferredStencilBufferBits = 0,
             UpdatesPerSecond = 0,
             FramesPerSecond = 0,
         };
+
+        // Silk.NET 默认靠反射（Assembly.Load）发现窗口/输入后端，NativeAOT 裁剪后这条路走不通，
+        // 会抛 "Couldn't find a suitable window platform"。显式指定 GLFW 平台即可（JIT 下也更省事）。
+        Window.PrioritizeGlfw();
 
         using var window = Window.Create(windowOptions);
         _window = window;
@@ -286,6 +292,12 @@ internal static class Program
 
     private static void ApplyOptionsToEngine(ProjectMEngine engine, AppOptions options)
     {
+        if (options.FixedTimeStep > 0)
+        {
+            engine.FixedTimeStep = options.FixedTimeStep;
+            engine.TargetFramesPerSecond = Math.Max(1, (int)Math.Round(1.0 / options.FixedTimeStep));
+        }
+
         if (options.PresetDuration > 0)
         {
             engine.PresetDuration = options.PresetDuration;
@@ -521,6 +533,13 @@ internal static class Program
 
     private static void OnHotkey(HotkeyCommand command)
     {
+        // 全屏切换与引擎无关，先处理（--bench 下没有输入上下文，走不到这里）。
+        if (command == HotkeyCommand.ToggleFullscreen)
+        {
+            ToggleFullscreen();
+            return;
+        }
+
         if (_engine is null || _window is null)
         {
             return;
@@ -576,6 +595,34 @@ internal static class Program
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>F11：窗口 ⇄ 全屏。</summary>
+    /// <remarks>
+    /// 不重建 EGL 上下文：ANGLE 的 window surface 会跟着宿主 HWND 的 WM_SIZE 重新分配 backbuffer，
+    /// 每帧的 <see cref="GetFramebufferSize"/> 拿到新尺寸后交给 <c>engine.SetWindowSize</c> 即可。
+    /// </remarks>
+    private static void ToggleFullscreen()
+    {
+        if (_window is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _window.WindowState = _window.WindowState == WindowState.Fullscreen
+                ? WindowState.Normal
+                : WindowState.Fullscreen;
+
+            Console.WriteLine(
+                $"全屏: {(_window.WindowState == WindowState.Fullscreen ? "开" : "关")} "
+                + $"({_window.Size.X}x{_window.Size.Y})");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("切换全屏失败: " + ex.Message);
         }
     }
 

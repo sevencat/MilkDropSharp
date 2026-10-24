@@ -60,7 +60,25 @@ public sealed class TranslationResult
 /// </summary>
 public sealed class HlslToGlslTranslator
 {
+    /// <summary>
+    /// 转译期间独占的锁。
+    /// </summary>
+    /// <remarks>
+    /// 从 C++ hlslparser 移植过来的这套代码里有若干进程级静态表（保留字、内建函数表、类型表），
+    /// 并发转译会偶发 "HLSL parsing failed"（xunit 并行跑测试时踩到过）。
+    /// 单次转译只有几毫秒，串行化的代价可以忽略，换掉这个偶发问题值得。
+    /// </remarks>
+    private static readonly object TranslationGate = new();
+
     public TranslationResult Translate(TranslationRequest request)
+    {
+        lock (TranslationGate)
+        {
+            return TranslateCore(request);
+        }
+    }
+
+    private TranslationResult TranslateCore(TranslationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Source);

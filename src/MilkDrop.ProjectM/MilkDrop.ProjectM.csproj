@@ -2,6 +2,8 @@
   <PropertyGroup>
     <RootNamespace>MilkDrop.ProjectM</RootNamespace>
     <AssemblyName>MilkDrop.ProjectM</AssemblyName>
+    <!-- P10：日常构建就跑裁剪/AOT 分析器，提前暴露不兼容写法 -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
     <!-- ANGLE（OpenGL ES 3.0）绑定；EGL 由本库 Rendering/Egl.cs 自行 P/Invoke（Silk.NET.OpenGLES 不含 EGL 绑定） -->

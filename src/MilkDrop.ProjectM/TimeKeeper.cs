@@ -62,13 +62,31 @@ public sealed class TimeKeeper
     /// <summary>当前预设的标称时长。</summary>
     public double PresetDuration => _presetDuration;
 
+    /// <summary>
+    /// 固定时间步长（秒）。大于 0 时不再读真实时钟，每帧按这个值推进。
+    /// </summary>
+    /// <remarks>
+    /// 用于批量验证与 AOT/JIT 截图对比：真实时钟会让"第 N 帧"对应不同的 <c>time</c>，
+    /// 画面自然对不上；固定步长后同帧号即同状态。
+    /// </remarks>
+    public double FixedTimeStep { get; set; }
+
     /// <summary>推进计时器，每帧调用一次。</summary>
     /// <remarks>对应 <c>TimeKeeper.cpp:17-26</c>。</remarks>
     public void UpdateTimers()
     {
-        var currentFrameTime = _timeProvider.GetElapsedTime(_startTimestamp).TotalSeconds;
-        _secondsSinceLastFrame = currentFrameTime - _currentTime;
-        _currentTime = currentFrameTime;
+        if (FixedTimeStep > 0)
+        {
+            _secondsSinceLastFrame = FixedTimeStep;
+            _currentTime += FixedTimeStep;
+        }
+        else
+        {
+            var currentFrameTime = _timeProvider.GetElapsedTime(_startTimestamp).TotalSeconds;
+            _secondsSinceLastFrame = currentFrameTime - _currentTime;
+            _currentTime = currentFrameTime;
+        }
+
         _presetFrameA++;
         _presetFrameB++;
     }

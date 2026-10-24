@@ -152,6 +152,12 @@
 
 **D8 ImGui 后端自写**：与 `ImguiDx9Renderer` 同思路，写 `ImguiGles3Renderer`（VAO+VBO+UBO 可选、font atlas 上传 `GL_RGBA`、`glScissor`、一个 300es 程序），约 300 行。比引入 native `imgui_impl_opengl3` 更契合现有工程（当前只有 `ImGui.NET 1.90.9.1`）。
 
+**D10 Q 变量扩到 64 个（`q1..q64`）。** 上游 `Constants.hpp:11` 是 32。复杂 mashup 预设把 32 个 q 复用得很紧，
+扩到 64 是纯增量：`q1..q32` 语义与 uniform 布局完全不变，只多出 `_qi.._qp` 8 个 `float4` 与对应的 `#define`。
+代价实测可忽略（每帧多传 32 个 float、shader 头多 40 行、表达式变量表 32→64），全量语料 9795 个预设里
+**没有任何一个**用到 `q33` 以上，因此不存在命名冲突。再往上加（128）需要把 bank 命名改成两位（`_qaa`），暂不做。
+对应的验收测试见 `MilkdropPresetTests.RenderFrame_ExtendedQVariablesReachShader`（q33/q64 驱动 comp shader 出颜色）。
+
 **D9 表达式求值桥接**：projectM 的 per-frame/per-pixel/per-point 三个上下文各自持 VM；`MilkDrop.Eval` 的 `Execute()` 返回 `double`，写入 `float` 状态时要显式收窄，保持一致（避免 `float`/`double` 混用导致与原生画面偏差）。
 
 ---
@@ -169,7 +175,65 @@
 | **P6** 音频 + 切换 ✅ | Audio 全套（P1 已完成）、`TimeKeeper`、`PresetTransition` + `TransitionShaderManager`（6 个内置过渡，GLES 精度头）、`IdlePreset` | **已完成**：6 个转场着色器全部编译通过；转场 quad 绘制 + 待机预设连续两帧渲染 GL error 0。WASAPI 采集与 30 分钟长跑属 P8/P9 | 3–4 天 |
 | **P7** 纹理管理 ✅ | `TextureManager`（扫描/`randNN_`/wrap-filter 前缀/age 淘汰）、`MilkdropNoise`（3D 纹理）、`TextureSamplerDescriptor.TryUpdate` + 弱引用语义 | **已完成**：描述符失效后可按名字重取（占位纹理回退与原生一致），测试覆盖三条分支 | 2–3 天 |
 | **P8** 应用层 ✅ | `ProjectMEngine`（对应 `ProjectM.cpp`：工厂/纹理/转场/音频/参数/事件）、`Preset`+`PresetFactory`+`PresetFactoryManager`、`MilkdropPresetFactory`、`Playlist`/`Item`/`Filter`；App 层：`AppOptions`（30+ 参数）、快捷键（Space/N/P/R/L/S/F/H/Esc）、预设浏览/搜索 UI、参数面板、FPS 统计、PNG 截图、文本 playlist、WASAPI 环回采集（NAudio，无设备时静音降级） | **已完成**：`--smoke` 待机预设 120 帧 120 FPS、GL error 0；UI 构建 + 截图验证；Engine 7 项测试 + Playlist/Filter 20 项测试全绿 | 3–5 天 |
-| **P9** 验证打磨 | 9795 预设 × N 帧批量跑；GL error/崩溃/编译失败清单；与原生 A/B 截图 | 崩溃率 0、GL error 0；失败清单收敛并归档 | 3–5 天 |
+| **P9** 验证打磨 ✅ | `--bench`（全量/分段/清单复测、增量 CSV、亮度统计）、`--synthetic-audio`（合成测试音）、失败清单归档 | **已完成**：9795 个 × 10 帧全部跑通，崩溃 0、GL error 0；加载失败 67（0.68%，均为预设自身语法损坏）；"全黑" 663 → 60 帧复测出图 329 → 300 帧抽样再出图 43。报告：`artifacts/p9/summary.txt` + `bench-all.csv`。逐像素 A/B 未自动化（原生 exe 不支持指定预设文件），步骤见第 7 节 | 3–5 天 |
+| **P10** Native AOT 发布 ✅ | `IsAotCompatible` 静态分析、`PublishAot` 发布配置、Silk.NET 平台显式注册、`--fixed-dt` 可复现截图、AOT vs JIT 逐像素对比 | **已完成**：`dotnet publish -p:PublishAot=true` 产出 4.5MB 单 exe（连同 ANGLE/cimgui/glfw 共 11.0MB，无需 .NET 运行时）；`--font-check`/`--smoke 240` 退出码 0；与 JIT 版截图平均差异 0.89/255；冷启动 0.46s vs 0.71s。已知限制：NAudio 的 WASAPI 在 AOT 下不可用（自动降级静音） | 3–5 天 |
+
+### P10 详细计划（Native AOT）
+
+**目标**：`dotnet publish -c Release -r win-x64 -p:PublishAot=true` 产出单文件 exe（不依赖 .NET 运行时），
+冷启动更快、部署只需拷几个 DLL（ANGLE 的 `libGLESv2.dll`/`libEGL.dll` 仍是原生依赖，必须随行）。
+日常开发仍用 `dotnet run`（JIT），AOT 只作为发布形态。
+
+**前置条件**：
+- MSVC 工具链：VS 2022 Build Tools + "使用 C++ 的桌面开发"（至少要有 `link.exe`）。
+  本机当前**没有** VS2022/link.exe，需先安装，否则 NativeAOT 会在链接阶段失败。
+- `Microsoft.DotNet.ILCompiler` 由 SDK 首次发布时自动还原。
+
+**已核对的兼容性**（静态检查结论）：
+
+| 组件 | 结论 | 依据 |
+| --- | --- | --- |
+| `MilkDrop.Eval` | ✔ 安全 | 手写 Lexer/Parser + `EvalNode` 树**解释执行**，全库 0 处 `Reflection.Emit`/`Expression.Compile` |
+| `HlslParser` | ✔ 安全 | 纯 C# 语法树 + 字符串拼接，无反射 |
+| `Silk.NET.*` | ✔ 安全 | `GL.GetApi(Func<string,nint>)` 走函数指针（官方支持 AOT） |
+| `ImGui.NET` | ⚠ 待实测 | 纯 `DllImport` + 结构体指针，无反射；但 `ImDrawDataPtr`/`ImFontAtlas` 的 marshalling 在裁剪后需实测 |
+| `NAudio`（WASAPI） | ⚠ 需开关 | COM 互操作 → `BuiltInComInteropSupport=true`（会产生 IL3050 警告）；若不可接受，则音频采集降级为 `--synthetic-audio`/外部进程 |
+| `StbImageSharp`/`StbImageWriteSharp` | ✔ 安全 | 纯 C#（unsafe 指针），无 P/Invoke |
+| 内嵌资源（shader/纹理） | ⚠ 待实测 | `Assembly.GetManifestResourceStream` + `<EmbeddedResource>`，AOT 下应在，需验证 5 个资源前缀都取得到 |
+
+**任务清单**：
+1. `Directory.Build.props` 打开 `<IsAotCompatible>true</IsAotCompatible>`（日常构建就跑裁剪分析器，提前暴露警告）。
+2. App 项目加条件属性：`PublishAot`/`RuntimeIdentifier=win-x64`/`StripSymbols`/`IlcOptimizationPreference=Speed`/`InvariantGlobalization`。
+3. 逐个处理 IL2026/IL3050 警告：COM（NAudio）、`Marshal.PtrToStructure`、动态类型转换。
+4. 资源读取改成可裁剪友好的写法（若被裁掉，用 `[DynamicDependency]` 或把资源改成生成的 `byte[]` 常量）。
+5. 验证脚本：AOT 产物跑 `--font-check`、`--smoke 240 --shot`、`--bench --bench-limit 50`，
+   再把截图与 JIT 版做逐像素差异（均值 < 1/255、最大差异 < 8/255）。
+6. 记录体积与冷启动时间（`Measure-Command { .\App.exe --smoke 1 }`）。
+
+**退路**：若 NAudio 的 COM 或 ImGui marshalling 在 AOT 下无法收敛，退回
+`SelfContained=true + PublishSingleFile=true + PublishReadyToRun=true`（体积约 60–80MB，但**不需要** C++ 工具链），
+AOT 作为后续优化项。
+
+**实测结果（2026-10-24，win-x64 / .NET 10）**：
+
+| 项 | 结果 |
+| --- | --- |
+| 发布产物 | `MilkDrop.ProjectM.App.exe` 4.50 MB + `av_libglesv2.dll` 5.14 MB + `cimgui.dll` 1.17 MB + `glfw3.dll` 0.22 MB = **11.03 MB**（无 pdb、无 .NET 运行时） |
+| 冷启动（`--smoke 1`，320×240） | AOT **0.46 s** vs JIT(Release) **0.71 s** |
+| 渲染 | `--smoke 240` 退出码 0，GL error 0；同预设同参数下 AOT 与 JIT 均 120 FPS（受 vsync 限制） |
+| 截图一致性 | 同一预设、`--fixed-dt 0.0166667`、240 帧：平均差异 **0.89/255**，差异>2 的像素 6.1%（集中在细线与抗锯齿边缘），画面结构完全一致 |
+| 字体/资源 | `--font-check` 通过（图集 512×256、缺字 0），5 个内嵌资源前缀全部可用 |
+| 已知限制 | **音频采集不可用**：`NAudio` 的 `MMDeviceEnumeratorComObject` 在 ILC 下是 "invalid IL"，运行期抛 `InvalidProgram_Specific`；`AudioCapture` 已捕获并降级为静音渲染（打一行提示） |
+
+AOT 下的两个必改点（已落到代码里）：
+- `Window.PrioritizeGlfw()`：Silk.NET 默认靠 `Assembly.Load` 发现窗口/输入后端，裁剪后会抛
+  "Couldn't find a suitable window platform"；同时用 `<TrimmerRootAssembly Include="Silk.NET.Windowing.Glfw"/>`
+  与 `Silk.NET.Input.Glfw` 根住两个后端。
+- `--fixed-dt`（引擎 `FixedTimeStep`）：真实时钟下"第 N 帧"在两次运行里对应不同 `time`，
+  截图永远对不上；固定步长后 AOT/JIT 才可逐像素比较（批量跑也默认启用 1/60）。
+
+若要恢复 AOT 版音频，需要把 WASAPI 那层换成 `[GeneratedComInterface]` 手写封装（`IAudioClient`/`IAudioCaptureClient`），
+或让音频采集跑在独立进程里通过共享内存喂 PCM。
 
 合计约 **30–44 人日**。
 
@@ -220,11 +284,47 @@ dotnet run --project src/MilkDrop.ProjectM.App -- --bench --bench-frames 10 ^
 
 :: 分段跑（每个进程约 2000 个，避免一次跑太久）
 ... --bench --bench-skip 2000 --bench-limit 2000 --bench-report artifacts/p9/bench-2000-4000.csv
+
+:: P10：Native AOT 发布（ILC 会额外生成 18MB 的 pdb，发布后删掉即 11MB）
+dotnet publish src\MilkDrop.ProjectM.App -c Release -r win-x64 -p:PublishAot=true ^
+  -o artifacts\p10\aot
+del artifacts\p10\aot\*.pdb
+
+:: AOT 与 JIT 的逐像素对比（必须带 --fixed-dt，否则两次的 time 不同）
+dotnet run --project src\MilkDrop.ProjectM.App -c Release -- --preset "<x>.milk" ^
+  --smoke 240 --no-ui --no-audio --fixed-dt 0.0166667 --shot artifacts\p10\jit.png
+artifacts\p10\aot\MilkDrop.ProjectM.App.exe --preset "<x>.milk" ^
+  --smoke 240 --no-ui --no-audio --fixed-dt 0.0166667 --shot artifacts\p10\aot.png
 ```
 
 CSV 列：`index,file,loaded,frames,gl_error,load_ms,mean_luminance,non_black_ratio,error,screenshot`。
 判定口径：`loaded=0`（含表达式/着色器编译失败）与 `gl_error!=0` 记为失败；
 `non_black_ratio` 仅作信息列（`! Transition` 这类预设本来就是过渡到黑）。
+批量跑的"全黑"复核请加 `--synthetic-audio`（否则大量靠音频驱动的预设会一直黑）：
+`--bench --bench-list <黑名单.txt> --bench-frames 60 --synthetic-audio`。
+
+### 与原生 `projectMSDL.exe` 的人工 A/B
+
+原生 SDL 前端**不支持**"加载指定预设文件"（只有 `--presetPath` 目录 + 记住上次播放位置），
+所以逐像素 A/B 只能人工做，步骤：
+
+```bat
+:: 1) 把目标预设单独放进一个目录（目录里只能有一个 .milk）
+mkdir artifacts\ab\single
+copy "<preset>.milk" artifacts\ab\single\single.milk
+
+:: 2) 启动原生（若它仍播放上次的预设，先删掉它写的配置/缓存再启动）
+res\projectMSDL-2.0.0-win64\projectMSDL.exe --presetPath artifacts\ab\single ^
+  --width 640 --height 480 --presetDuration 999 --transitionDuration 0
+
+:: 3) 我们的实现，同尺寸同预设，跑固定帧数后出图
+dotnet run --project src\MilkDrop.ProjectM.App -- --preset artifacts\ab\single\single.milk ^
+  --width 640 --height 480 --no-audio --smoke 240 --shot artifacts\ab\ours.png
+```
+
+对比时注意：原生窗口含标题栏/边框，抓屏后要裁掉；且两边时间基准不同（原生从 0 连续跑，
+我们同样从 0 开始），差异应在"同一帧号"内很小。本次 P9 只做了"原生同类预设能正常出图"的确认，
+逐预设的像素级 A/B 留作后续人工回归。
 
 ---
 

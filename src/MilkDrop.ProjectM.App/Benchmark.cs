@@ -45,6 +45,12 @@ internal static class Benchmark
         engine.SetWindowSize(width, height);
 
         var entries = new List<BenchmarkEntry>(presets.Count);
+        // 批量跑固定时间步长：结果可复现，也方便和 AOT/JIT 版本逐像素对比。
+        double previousFixedTimeStep = engine.FixedTimeStep;
+        int previousTargetFps = engine.TargetFramesPerSecond;
+        engine.FixedTimeStep = 1.0 / 60.0;
+        engine.TargetFramesPerSecond = 60;
+
         var total = Stopwatch.StartNew();
 
         Console.WriteLine($"bench: {presets.Count} 个预设 x {frames} 帧 @ {width}x{height}");
@@ -133,6 +139,9 @@ internal static class Benchmark
         }
 
         total.Stop();
+
+        engine.FixedTimeStep = previousFixedTimeStep;
+        engine.TargetFramesPerSecond = previousTargetFps;
 
         int failed = entries.Count(entry => !entry.Loaded);
         int withGlError = entries.Count(entry => entry.GlError != 0);

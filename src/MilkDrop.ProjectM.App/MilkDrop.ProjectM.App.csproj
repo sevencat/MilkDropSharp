@@ -5,6 +5,33 @@
     <AssemblyName>MilkDrop.ProjectM.App</AssemblyName>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
+
+  <!--
+    Native AOT 发布（P10）：日常 dotnet run/build 不受影响，只有显式 -p:PublishAot=true 时才生效。
+    需要 MSVC 工具链（link.exe），见 projectMPlan.md 的 P10 小节。
+  -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <StripSymbols>true</StripSymbols>
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- NAudio 的 WASAPI 走 COM 互操作；NativeAOT 下需要内建 COM 支持（会有 IL3050 警告）。 -->
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- 关掉用不到的基础设施，减小体积。 -->
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <!--
+      Silk.NET 的窗口/输入后端是在运行时按 assembly 名发现的，裁剪会把它们丢掉。
+      根住这两个 assembly（配合 Program.Main 里的 Window.PrioritizeGlfw）。
+    -->
+    <TrimmerRootAssembly Include="Silk.NET.Windowing.Glfw" />
+    <TrimmerRootAssembly Include="Silk.NET.Input.Glfw" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />

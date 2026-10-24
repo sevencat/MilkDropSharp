@@ -273,6 +273,18 @@ public sealed class ProjectMEngine : IDisposable
     /// <summary>设置窗口前先探测的帧率（写进 <c>RenderContext.Fps</c>）。</summary>
     public int TargetFramesPerSecond { get; set; } = 35;
 
+    /// <summary>
+    /// 固定时间步长（秒）；大于 0 时不再读真实时钟，每帧按它推进。
+    /// </summary>
+    /// <remarks>
+    /// 批量跑与 AOT/JIT 截图对比必须用它，否则"第 N 帧"在两次运行里对应不同的 <c>time</c>。
+    /// </remarks>
+    public double FixedTimeStep
+    {
+        get => _timeKeeper.FixedTimeStep;
+        set => _timeKeeper.FixedTimeStep = value;
+    }
+
     public float BeatSensitivity
     {
         get => _beatSensitivity;
