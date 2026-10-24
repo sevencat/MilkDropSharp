@@ -21,6 +21,10 @@ public static class Screenshot
 
         var pixels = new byte[width * height * 4];
 
+        // Framebuffer.Unbind() 只解绑 draw（与 C++ 一致），read 还指着上一个离屏目标。
+        // 那个目标可能是 RGBA16F —— 用 GL_UNSIGNED_BYTE 读它会直接 GL_INVALID_OPERATION 并返回全 0。
+        gl.BindFramebuffer(GLEnum.ReadFramebuffer, 0);
+
         fixed (byte* pointer = pixels)
         {
             // 默认帧缓冲的行宽不一定是 4 字节对齐，先关掉 pack 对齐。

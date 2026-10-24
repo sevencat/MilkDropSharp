@@ -76,9 +76,12 @@ public sealed class AudioEngine : IDisposable
     }
 
     /// <summary>从头开始（换作品/重置时钟时用）。</summary>
-    public void Reset()
+    public void Reset() => SeekToSample(0);
+
+    /// <summary>跳到指定采样点（时间轴拖动时用）：清空缓冲，从该点重新合成。</summary>
+    public void SeekToSample(long sample)
     {
-        _nextSample = 0;
+        _nextSample = Math.Max(0, sample);
         Buffer.Clear();
     }
 

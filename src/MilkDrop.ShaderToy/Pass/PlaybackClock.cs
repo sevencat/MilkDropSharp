@@ -43,6 +43,20 @@ public sealed class PlaybackClock
         Frame++;
     }
 
+    /// <summary>
+    /// 跳到指定时刻（UI 时间轴用）。
+    /// </summary>
+    /// <remarks>
+    /// 帧号一并归零：<c>iFrame</c> 在 Shadertoy 里是"已经渲染了多少帧"，跳转后确实重新开始计数；
+    /// 有些作品拿它当随机种子，归零比"按秒数推算帧号"更可重复。
+    /// </remarks>
+    public void Seek(double seconds)
+    {
+        Time = (float)Math.Max(0.0, seconds);
+        TimeDelta = 0f;
+        Frame = 0;
+    }
+
     /// <summary>回到 0 帧 / 0 秒（暂停状态保持不变）。</summary>
     public void Reset()
     {

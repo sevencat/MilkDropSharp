@@ -64,7 +64,8 @@ public sealed class PipelineOptions
 /// <para>
 /// <c>sound</c> pass 不在这里画：它由 <see cref="Audio.SoundPassRenderer"/> 按"一个片元 = 一个采样点"
 /// 批量渲染，音频闭环在 <see cref="AudioEngine"/>；但 program 的编译与生命周期仍由本类统一管，
-/// 编译失败只记 <see cref="Notes"/>，不影响画面。cubemap/volume 的**资源**（不是 pass）用占位纹理（P8 下载）。
+/// 编译失败只记 <see cref="Notes"/>，不影响画面。cubemap/volume 的**资源**（不是 pass）即使已经
+/// 下载到 <c>textures/</c>，绑定侧仍用占位纹理（加载 samplerCube/sampler3D 是 P5 的遗留项）。
 /// </para>
 /// </remarks>
 public sealed class ShaderToyPipeline : IDisposable
@@ -81,6 +82,9 @@ public sealed class ShaderToyPipeline : IDisposable
     private int _width;
     private int _height;
     private bool _disposed;
+
+    /// <summary>通道绑定从 <see cref="Notes"/> 的哪个下标开始写（重绑时从这里截断）。</summary>
+    private int _bindingNoteStart = -1;
 
     public ShaderToyPipeline(ShaderToyProject project, PipelineOptions options)
     {
@@ -128,7 +132,7 @@ public sealed class ShaderToyPipeline : IDisposable
             catch (Exception ex) when (ex is GlShaderException or NotSupportedException or ArgumentException)
             {
                 // 把出错的那一行贴出来：只有 "0:57: syntax error" 没法定位
-                int? line = TryFindErrorLine(ex.Message, out string? lineText);
+                int? line = TryFindErrorLine(source, ex.Message, out string? lineText);
                 CompileErrors.Add(new PassCompileError(Label(pass), ex.Message, line, lineText, source));
                 Notes.Add($"{Label(pass)} 编译失败，已跳过：{ex.Message}{FormatOffendingLine(line, lineText)}");
                 continue;
@@ -171,6 +175,8 @@ public sealed class ShaderToyPipeline : IDisposable
         }
 
         // 4) 通道绑定表（静态部分在这里定，动态部分每帧在 BindChannels 里取）
+        _bindingNoteStart = Notes.Count;
+
         foreach (Slot slot in _slots)
         {
             BuildBindings(slot);
@@ -179,6 +185,9 @@ public sealed class ShaderToyPipeline : IDisposable
 
     /// <summary>导入/转译/绑定过程中的提示。</summary>
     public List<string> Notes { get; } = [];
+
+    /// <summary>编译失败但被跳过的 pass（UI 的错误面板用）。</summary>
+    public List<PassCompileError> CompileErrors { get; } = [];
 
     /// <summary>最终上屏的纹理（image pass 的输出）。</summary>
     public Texture? Output => ImageSlot?.Target?.ReadTexture;
@@ -229,6 +238,41 @@ public sealed class ShaderToyPipeline : IDisposable
 
         _options.BufferResolution = resolution;
         ApplySizes();
+    }
+
+    /// <summary>
+    /// 按当前的 <see cref="ShaderToyProject"/> 模型重新绑一次通道（改 sampler / vflip / 图片路径后调用）。
+    /// </summary>
+    /// <remarks>
+    /// 只重绑通道、不重编 program：通道的**类型**决定了 <c>sampler2D</c> 还是 <c>samplerCube</c>，
+    /// 改类型必须重新构造管线（转译结果不同）。上一轮绑定产生的提示会被清掉，
+    /// 否则每次换 sampler 都会在同一处堆一条"找不到图片"。
+    /// </remarks>
+    public void RefreshBindings()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        foreach (Texture texture in _ownedTextures)
+        {
+            texture.Dispose();
+        }
+
+        _ownedTextures.Clear();
+
+        if (_bindingNoteStart >= 0 && Notes.Count > _bindingNoteStart)
+        {
+            Notes.RemoveRange(_bindingNoteStart, Notes.Count - _bindingNoteStart);
+        }
+
+        foreach (Slot slot in _slots)
+        {
+            slot.Bindings.Clear();
+        }
+
+        foreach (Slot slot in _slots)
+        {
+            BuildBindings(slot);
+        }
     }
 
     /// <summary>渲染一帧。结果在 <see cref="Output"/>。</summary>
@@ -340,7 +384,9 @@ public sealed class ShaderToyPipeline : IDisposable
         }
         catch (Exception ex) when (ex is GlShaderException or NotSupportedException or ArgumentException)
         {
-            Notes.Add($"{Label(pass)} 编译失败，音频不可用：{ex.Message}");
+            int? line = TryFindErrorLine(null, ex.Message, out string? lineText);
+            CompileErrors.Add(new PassCompileError(Label(pass), ex.Message, line, lineText, null));
+            Notes.Add($"{Label(pass)} 编译失败，音频不可用：{ex.Message}{FormatOffendingLine(line, lineText)}");
         }
     }
 
@@ -448,8 +494,8 @@ public sealed class ShaderToyPipeline : IDisposable
 
                 case ShaderInputType.Cubemap:
                 case ShaderInputType.Volume:
-                    // 作品自带的 cubemap/volume 资源要联网下载，P8 再做
-                    Notes.Add($"{Label(slot.Pass)} 通道 {input.Channel}：{input.Type} 资源暂用占位纹理（P8 下载）。");
+                    // 资源文件由 P8 下载到 textures/，但加载 samplerCube/sampler3D 还没接（P5 遗留）
+                    Notes.Add($"{Label(slot.Pass)} 通道 {input.Channel}：{input.Type} 资源暂用占位纹理（加载侧未接）。");
                     break;
             }
 
@@ -504,7 +550,7 @@ public sealed class ShaderToyPipeline : IDisposable
         string? path = ResolveTexturePath(input.Path);
         if (path is null)
         {
-            Notes.Add($"{Label(slot.Pass)} 通道 {input.Channel}：找不到图片 {input.Path}（P8 会下载到本地缓存），用黑纹理。");
+            Notes.Add($"{Label(slot.Pass)} 通道 {input.Channel}：找不到图片 {input.Path}（应在作品目录的 textures/ 下），用黑纹理。");
             return null;
         }
 
@@ -529,8 +575,14 @@ public sealed class ShaderToyPipeline : IDisposable
     /// 把 JSON 里的 <c>/media/...</c> / 相对路径解析成本地文件。
     /// </summary>
     /// <remarks>
-    /// Shadertoy 的 <c>filepath</c> 是站点上的绝对路径，本地只能按"文件名"在搜索目录里找。
-    /// P8 会把资源下载到 <c>res/shadertoy/downloads</c>，那时搜索目录里就能命中。
+    /// <para>
+    /// 下载后的作品（P8）里写的是相对路径 <c>textures/xxx.jpg</c>，基准是**作品目录** ——
+    /// 搜索目录里先按整条相对路径找，再退回"只按文件名找"（兼容手工整理的工程）。
+    /// </para>
+    /// <para>
+    /// 没下载过的作品里还是站点绝对路径（<c>/media/a/...</c>）：按文件名在作品目录、
+    /// 以及作品目录的 <c>textures/</c> 里找 —— 手工把图丢进 <c>textures/</c> 就能直接用。
+    /// </para>
     /// </remarks>
     private string? ResolveTexturePath(string? path)
     {
@@ -550,6 +602,8 @@ public sealed class ShaderToyPipeline : IDisposable
             return null;
         }
 
+        string relative = path.Replace('/', Path.DirectorySeparatorChar);
+
         foreach (string directory in _options.TextureSearchPaths)
         {
             if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
@@ -557,10 +611,29 @@ public sealed class ShaderToyPipeline : IDisposable
                 continue;
             }
 
-            string candidate = Path.Combine(directory, fileName);
-            if (File.Exists(candidate))
+            // 1) 作品目录 + 相对路径（textures/noise.jpg）
+            if (!Path.IsPathRooted(relative))
             {
-                return candidate;
+                string candidate = Path.Combine(directory, relative);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            // 2) 只按文件名（老工程把图放在 project.json 旁边）
+            string byName = Path.Combine(directory, fileName);
+            if (File.Exists(byName))
+            {
+                return byName;
+            }
+
+            // 3) <目录>/textures/<文件名>：手工把下载好的图丢进作品目录的 textures/ 时，
+            //    JSON 里可能还留着站点路径（/media/a/xxx.png），这里兜底按文件名找（S8-7）
+            string inTextures = Path.Combine(directory, "textures", fileName);
+            if (File.Exists(inTextures))
+            {
+                return inTextures;
             }
         }
 
@@ -593,25 +666,33 @@ public sealed class ShaderToyPipeline : IDisposable
         return sampler;
     }
 
-    /// <summary>从驱动的报错里抠出行号，贴回源码那一行（ANGLE 的格式是 "0:57: ..."）。</summary>
-    private static string OffendingLine(string? source, string message)
+    /// <summary>从驱动的报错里抠出行号（ANGLE 的格式是 "0:57: ..."），并取出那一行源码。</summary>
+    private static int? TryFindErrorLine(string? source, string message, out string? lineText)
     {
-        if (source is null)
-        {
-            return string.Empty;
-        }
+        lineText = null;
 
         Match match = Regex.Match(message, @"0:(\d+)");
         if (!match.Success || !int.TryParse(match.Groups[1].Value, out int lineNumber))
         {
-            return string.Empty;
+            return null;
         }
 
-        string[] lines = source.Split('\n');
-        return lineNumber >= 1 && lineNumber <= lines.Length
-            ? $"{Environment.NewLine}  第 {lineNumber} 行: {lines[lineNumber - 1].TrimEnd('\r')}"
-            : string.Empty;
+        if (source is not null)
+        {
+            string[] lines = source.Split('\n');
+            if (lineNumber >= 1 && lineNumber <= lines.Length)
+            {
+                lineText = lines[lineNumber - 1].TrimEnd('\r');
+            }
+        }
+
+        return lineNumber;
     }
+
+    private static string FormatOffendingLine(int? line, string? lineText) =>
+        line is { } number && lineText is { Length: > 0 }
+            ? $"{Environment.NewLine}  第 {number} 行: {lineText}"
+            : string.Empty;
 
     private bool IsPassReference(string? id) => !string.IsNullOrEmpty(id) && _byId.ContainsKey(id);
 

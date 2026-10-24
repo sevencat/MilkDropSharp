@@ -86,8 +86,11 @@ internal sealed class Player : IDisposable
     /// <summary>标题（窗口/UI 用）。</summary>
     public string Title { get; private set; } = "内置演示";
 
-    /// <summary>当前作品来源（文件路径或 "builtin"）。</summary>
-    public string SourceName { get; private set; } = "builtin";
+    /// <summary>内置演示用的作品来源标识。</summary>
+    public const string BuiltinSource = "builtin";
+
+    /// <summary>当前作品来源（文件路径或 <see cref="BuiltinSource"/>）。</summary>
+    public string SourceName { get; private set; } = BuiltinSource;
 
     /// <summary>最近一次加载/编译的错误（成功时 null）。</summary>
     public string? Error { get; private set; }
@@ -123,6 +126,13 @@ internal sealed class Player : IDisposable
     /// <summary>音频侧的失败原因（没有设备、sound pass 编译失败……）。</summary>
     public string? AudioError { get; private set; }
 
+    /// <summary>当前管线（UI 要读通道绑定/编译错误时用）。</summary>
+    public ShaderToyPipeline? Pipeline => _pipeline;
+
+    /// <summary>被跳过的 pass 及其报错（错误面板用）。</summary>
+    public IReadOnlyList<PassCompileError> CompileErrors =>
+        _pipeline?.CompileErrors ?? (IReadOnlyList<PassCompileError>)[];
+
     /// <summary>加载一个 Shadertoy 导出 JSON；失败时回落到演示作品。</summary>
     public bool LoadFile(string path)
     {
@@ -130,19 +140,13 @@ internal sealed class Player : IDisposable
         {
             ShaderToyProject project = ShaderToyJsonImporter.LoadFile(path);
 
-            var options = BuildOptions(path);
-            var pipeline = new ShaderToyPipeline(project, options);
+            if (Compile(project, path))
+            {
+                return true;
+            }
 
-            _pipeline?.Dispose();
-            _pipeline = pipeline;
-            AttachAudio(pipeline);
-
-            Project = project;
-            Title = string.IsNullOrEmpty(project.Metadata.Name) ? Path.GetFileName(path) : project.Metadata.Name;
-            SourceName = path;
-            Error = null;
-            Clock.Reset();
-            return true;
+            LoadDemo();
+            return false;
         }
         catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException
                                        or ShaderToyImportException or ShaderException
@@ -154,13 +158,105 @@ internal sealed class Player : IDisposable
         }
     }
 
-    /// <summary>加载内置演示作品。</summary>
+    /// <summary>
+    /// 从磁盘重新读入当前作品（界面上的"重新加载"）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="LoadFile"/> 的区别：失败时**保留当前画面**，只把原因写进 <see cref="Error"/>，
+    /// 不回落到演示作品 —— 重新读入不该因为文件正被外部编辑器写坏而丢掉正在看的东西。
+    /// </remarks>
+    /// <returns>是否重新读入并重建了管线。</returns>
+    public bool Reload()
+    {
+        if (SourceName == BuiltinSource)
+        {
+            return false;
+        }
+
+        try
+        {
+            ShaderToyProject project = ShaderToyJsonImporter.LoadFile(SourceName);
+
+            // Compile 在构造新管线成功后才换掉旧的：编译失败时画面仍是上一次的内容
+            return Compile(project, SourceName);
+        }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException
+                                       or ShaderToyImportException or ShaderException
+                                       or InvalidOperationException or ArgumentException)
+        {
+            Error = $"{Path.GetFileName(SourceName)}: {ex.Message}";
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 用一个工程重建管线（加载 / 重新加载走这里）。
+    /// </summary>
+    /// <remarks>
+    /// 单个 pass 编译失败**不算**整体失败：失败信息进 <see cref="CompileErrors"/>，该 pass 被跳过，
+    /// 其余照常渲染 —— 改坏一个 pass 时还能看到别的部分和报错。
+    /// 这里不碰 <see cref="Error"/> 以外的状态：标题、时钟都由调用方语义决定。
+    /// </remarks>
+    public bool Compile(ShaderToyProject project, string sourceName)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+
+        try
+        {
+            var pipeline = new ShaderToyPipeline(project, BuildOptions(sourceName));
+
+            _pipeline?.Dispose();
+            _pipeline = pipeline;
+            AttachAudio(pipeline);
+
+            Project = project;
+            SourceName = sourceName;
+            Title = string.IsNullOrEmpty(project.Metadata.Name)
+                ? (sourceName == BuiltinSource ? "内置演示" : Path.GetFileName(sourceName))
+                : project.Metadata.Name;
+            Error = null;
+            Clock.Reset();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException
+                                       or ShaderException or NotSupportedException)
+        {
+            Error = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>跳到指定时刻（时间轴用）：画面与音频一起重新对齐。</summary>
+    public void Seek(float seconds)
+    {
+        seconds = Math.Max(0f, seconds);
+        Clock.Seek(seconds);
+        _audio?.SeekToSample((long)Math.Round(seconds * (float)AudioBuffer.SampleRate));
+    }
+
+    /// <summary>把当前帧缓冲存成 PNG（<b>必须在画完 shader、画 UI 之前调用</b>，否则截图里会有界面）。</summary>
+    /// <returns>实际写入的绝对路径；没有可截的画面时返回 null。</returns>
+    public string? Screenshot(string? path = null)
+    {
+        if (_pipeline?.Output is null)
+        {
+            return null;
+        }
+
+        path ??= Path.Combine("screenshots", $"shot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
+
+        // 不再重渲一遍：默认帧缓冲里就是刚才 Render + CopyTexture 的结果，
+        // 重渲会推进 buffer 的 ping-pong，截出来的不是屏幕上那一帧。
+        return MilkDrop.Rendering.Gles3.Screenshot.Save(GlContext.Gl, _width, _height, path);
+    }
+
+    /// <summary>加载内置演示作品（顺便也把它当成可编辑的工程）。</summary>
     public void LoadDemo()
     {
         var project = new ShaderToyProject
         {
             Version = "0.1",
-            Metadata = new ShaderToyMetadata { Id = "builtin", Name = "内置演示" },
+            Metadata = new ShaderToyMetadata { Id = BuiltinSource, Name = "内置演示" },
         };
 
         var pass = new ShaderPass
@@ -173,23 +269,10 @@ internal sealed class Player : IDisposable
 
         project.Passes.Add(pass);
 
-        try
+        if (!Compile(project, BuiltinSource))
         {
-            var pipeline = new ShaderToyPipeline(project, BuildOptions(null));
-            _pipeline?.Dispose();
-            _pipeline = pipeline;
-            AttachAudio(pipeline);
-            Error = null;
+            Error = "演示作品编译失败: " + Error;
         }
-        catch (ShaderException ex)
-        {
-            Error = "演示作品编译失败: " + ex.Message;
-        }
-
-        Project = null;
-        Title = "内置演示";
-        SourceName = "builtin";
-        Clock.Reset();
     }
 
     public void Resize(int width, int height)
@@ -352,7 +435,7 @@ internal sealed class Player : IDisposable
         };
 
         // 作品自带的图片优先在 JSON 旁边找，其次是显式给的搜索目录
-        if (!string.IsNullOrEmpty(projectPath))
+        if (!string.IsNullOrEmpty(projectPath) && projectPath != BuiltinSource)
         {
             string? directory = Path.GetDirectoryName(Path.GetFullPath(projectPath));
             if (!string.IsNullOrEmpty(directory))

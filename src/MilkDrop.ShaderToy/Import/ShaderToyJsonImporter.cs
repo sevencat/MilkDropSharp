@@ -40,6 +40,18 @@ public static class ShaderToyJsonImporter
         return Parse(ReadAllTextTolerant(path));
     }
 
+    /// <summary>
+    /// 读文本文件（严格 UTF-8，失败回退 Latin1）。
+    /// </summary>
+    /// <remarks>
+    /// 导入本地 JSON 时要保存**原文**，不能再从模型序列化回去，所以这里把读取逻辑公开出来复用（S7-4 / S8-3）。
+    /// </remarks>
+    public static string ReadTextTolerant(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return ReadAllTextTolerant(path);
+    }
+
     /// <summary>解析 JSON 文本；<see cref="ShaderToyProject.RawJson"/> 保存传入的原文。</summary>
     /// <exception cref="JsonException">不是合法 JSON。</exception>
     /// <exception cref="ShaderToyImportException">是合法 JSON 但不是 Shadertoy 工程。</exception>

@@ -2,9 +2,12 @@
 
 > 每条格式：现象 → 依据 → 结论/对策。计划见 `shaderToyPlan.md`。
 >
-> **状态：P0–P6 已落地**（导入、转译、image 渲染、pass 图、输入通道、sound pass 与自产音频；
-> `tests/MilkDrop.ShaderToy.Tests` 90 个用例全绿）。
-> 未做：ImGui 界面（P7）、资源下载（P8）、cube/volume **资源**（占位）、resize 内容保留、AOT 发布（P9）。
+> **状态：P0–P8 已落地**（导入、转译、image 渲染、pass 图、输入通道、sound pass 与自产音频、ImGui 界面、
+> 本地库、下载、本地 JSON 导入、代理配置与"手工补资源"；`tests/MilkDrop.ShaderToy.Tests` 159 个用例全绿，
+> 其中 P8 新增 56 个）。
+> 未做：cube/volume **资源的绑定**（文件能下载，采样仍走占位）、resize 内容保留、AOT 发布（P9）。
+> 另外：本站真实下载需要登录/浏览器指纹，curl 与 .NET 客户端（含走 socks5）都被 Cloudflare 403 拦，
+> 故自动下载暂时搁置，改用手工放 `textures/` + "补齐"（S8-8 / S8-11）。
 > 标注 `已确认` 的来自上游源码、本仓库既有结论或已实测；标注 `待验证` 的是预判，
 > 落地时必须实测后改写成真实记录（附证据）。
 
@@ -474,10 +477,132 @@
 
 ## S-P7 / S-P9 界面与 AOT
 
-### S7-1 ImGui 多行文本编辑的性能陷阱（待验证）
+### S7-1 ImGui 多行文本编辑的性能陷阱（已确认，实现与预想不同）
 
 - **现象**：`InputTextMultiline` 每次调用都要把 `string` 封送成原生缓冲，几千行的 shader 每帧都封送会卡。
 - **对策**：用 `byte[]` + `GCHandle`/`NativeString` 常驻缓冲，只在 `IsItemDeactivatedAfterEdit` 时把内容同步回 `string` 并触发重编译。
+- **实测（坑）**：ImGui.NET 1.90.9.1 **只暴露了 `ref string` 的多行重载**，`InputText` 有 `byte[]`/`IntPtr` 重载，`InputTextMultiline` 没有。
+  所以最终是绕到原生入口 `ImGuiNative.igInputTextMultiline(label, buf, size, ...)`（`byte*` + 定长缓冲）。
+- **实现**（`App/Ui/PassEditor.cs`）：
+  - 容量 = 源码 UTF-8 字节数 × 2 + 16 KB，钉住（`GCHandle.Pinned`），label 也固定成一份 UTF-8；
+  - 只有 `IsItemEdited()` 时才扫一次 0 结尾重算长度，`IsItemDeactivatedAfterEdit()` 时把文本写回 `ShaderPass.Code` 并自动重编译；
+  - 缓冲将满时编辑器上方显示红字警告（原生入口不能扩容，只能提示）。
+- **当时的验收**：`--selfcheck-edits` 把 image pass 换成"整屏品红"，`Player.ApplyEdits()` 返回成功、
+  pass 数 1、编译错误 0，`--shot` 出图整屏品红（`artifacts/p7_edit.png`，未入库它已被 .gitignore 忽略）。
+- **现状（P8 之后，S7-13）**：界面改为只读，`App/Ui/PassEditor.cs` 已删除；本节留作"以后真要做编辑器"的参考。
+
+### S7-5 默认字体没有中文（已确认 → 已修）
+
+- **现象**：ImGui 默认 `ProggyClean` 只有 ASCII，界面里的中文全变方块（此前几版的 UI 一直如此，只是没人细看）。
+- **对策**：`App/Ui/UiFonts.cs` 在 `ImGui.CreateContext()` 之后、渲染器建图集之前挂字体：
+  - 中文：`msyh.ttc`（微软雅黑，`GetGlyphRangesChineseSimplifiedCommon()`），设为 `io.FontDefault`；
+  - 等宽：`consola.ttf`，并用 `MergeMode` 把中文字形合进来 —— 否则 shader 里的中文注释还是方块；
+  - 全都从 `C:\Windows\Fonts` 读，不随包分发；找不到就退回默认字体并打一行警告。
+- **实测**：图集从 512×64 涨到 **1024×2048（8 MB）**，仍是一次性上传；中文标签与中文注释都正常显示。
+
+### S7-6 `Screenshot` 读默认帧缓冲会 GL_INVALID_OPERATION（已确认 → 已修）
+
+- **现象**：`--shot` 出来的 PNG 是空白（RGBA 全 0），同时 `glGetError()` = `0x0502`。
+- **根因**：`Framebuffer.Unbind()` **只解绑 draw**（与上游 C++ 一致），read framebuffer 还指着最后一个离屏目标（RGBA16F）；
+  用 `GL_UNSIGNED_BYTE` 去读 16F 的 FBO → `GL_INVALID_OPERATION`，`ReadPixels` 什么也没写。
+- **对策**：`Screenshot.Save` 开头显式 `BindFramebuffer(ReadFramebuffer, 0)` —— 它的契约就是"存默认帧缓冲"，本来就该自己保证。
+- **复测**：整窗截图正常（含界面）。这个 bug 在 P4–P6 一直存在，只是没人用过截图功能。
+
+### S7-7 `--shot` / `--selfcheck-reload`：无人值守的界面回归
+
+- **`--shot PATH [--shot-frames N]`**：第 N 帧（默认 30）把**整窗**（shader + 界面）存图后退出。
+  用于肉眼检查界面，也可作为 P9 的截图基线。
+- **`--selfcheck-reload`**（替代已删除的 `--selfcheck-edits`）：先改掉内存里的 image 代码（不写盘），
+  再 `Player.Reload()`；代码必须恢复成文件里的内容 —— 这样能证明"重新加载"确实是从**磁盘**读，
+  而不是把内存里的东西再编译一遍。**实测**：`Reload 成功，代码已从文件恢复 = True`。
+- **实测**：`--shot-frames 150` 全程 2.3 s（含约 1.6 s 启动），渲染稳定在 **240 FPS** 左右（flGyWc，1280×720，ANGLE/D3D11）。
+
+### S7-8 FPS 统计口径（已确认 → 已修）
+
+- **现象**：界面长期显示 `0.6 FPS`，但实际是 240 FPS。
+- **根因**：第一帧把"编译 shader + 上传 8 MB 字体图集"的 1.6 s 算进了统计窗口；之后窗口要再攒满 0.5 s 才刷新，
+  低帧率期间看起来就像卡死。同时 Silk 给的 `deltaSeconds` 也不适合当计时基准。
+- **对策**：帧率用自建 `Stopwatch` 算，且窗口起点在**加载完成之后**才归零。
+
+### S7-9 本地库扫描（P7 提前做了 P8 的读侧）
+
+- **实现**：`Import/ShaderLibrary.cs`（库层、纯文件 IO、可单测）：
+  - 两种布局：`<root>/<id>/project.json`（P8 下载后的标准布局）与 `<root>/*.json`（仓库里的 `res/shadertoy/stpreset`）；
+  - `meta.json` 存在时只读它（不解析代码）；不存在才用容忍型导入器完整解析一次取 `info.name/username`；
+  - `project.json` 坏掉时退回"目录名/文件名"并记警告，不让整个列表失败；
+  - 缩略图认 `thumbnail.png` / `thumbnail.jpg` / `preview.png`，按路径缓存（`TextureLoader`，StbImageSharp）。
+- **实测**：`res/shadertoy/stpreset` 扫出 5 个作品（标题/作者都正确），排序按修改时间；
+  覆盖测试 `tests/.../Import/ShaderLibraryTests.cs`（6 个用例）。
+
+### S7-10 快捷键与 ImGui 的键盘捕获（已确认）
+
+- **现象**：开了 `ImGuiConfigFlags.NavEnableKeyboard` 后，`WantCaptureKeyboard` 经常为真，
+  于是空格/R/F11/F12 全部失效 —— 编辑器一打开就再也没法暂停或截图。
+- **对策**：F11/F12（功能键）不检查捕获状态；空格/R 仍然只在界面没吃键盘时生效（否则打字会打出一个空格还顺便暂停）。
+- **注意**：界面里那句"键盘被界面占用"是真实状态，不是 bug。
+
+### S7-12 高 DPI 下界面字号偏小（已确认 → 已修）
+
+- **现象**：界面文字明显偏小（用户反馈）。实测这台机器是 **175% DPI（168 DPI）**，
+  而进程原本没声明 DPI 感知 —— 1280×720 的窗口把那 1280×720 当点数用，于是整块界面只有应有尺寸的 1/1.75。
+  之前截图里"窗口 1280×720 但 PNG 只有 1092×614"也是同一件事的副作用。
+- **修法**（对齐 ProjectM 线的做法）：
+  1. 建窗口**之前** `SetProcessDpiAwarenessContext(PerMonitorV2)`（实测返回成功）；
+  2. 窗口尺寸按 `GetDpiForSystem()/96` 放大：1280×720 → **2240×1260**，并夹到屏幕 92%/88% 以内；
+  3. `ImGui.GetStyle().ScaleAllSizes(scale)`，字体 18×scale / 代码 17×scale（175% 下 31.5px / 29.8px）；
+  4. 界面里的面板宽度、表格列宽、时间轴滑块宽度等像素常量**全部乘 scale**，否则字变大了面板还是老的宽度，按钮会被挤出去；
+  5. `--ui-scale F` 可手动覆盖（也会影响启动窗口尺寸）。
+- **图集代价**：31.5px + 2500 个汉字，ImGui 默认 2×2 过采样会顶到 2048×4096（32 MB）；
+  关掉过采样（`OversampleH/V = 1`）后是 **2048×2048（16 MB）**，31px 字号下肉眼无差。
+- **布局陷阱**：`imgui.ini` 会记住上次的窗口尺寸，DPI/分辨率一变，旧尺寸会把面板挤扁。
+  现在检测到帧缓冲尺寸变化就强制重排一次（`ImGuiCond.Always`），之后用户自己拖的布局仍会被记住。
+- **实测**：2240×1260 下 flGyWc 约 **89 FPS**；音频缓冲 212 ms、欠载 0 帧；
+  `--shot` 出图确认中文、按钮、通道表都放得下（`artifacts/p7_final.png`）。
+
+### S7-11 P7 的已知缺口（未实测的部分）
+
+- **拖拽**：`window.FileDrop` → JSON 走 `_openPath`（与 `--shader` 同一条加载路径，已验证），
+  图片以前塞进选中通道，现在只弹提示（界面不再编辑，S7-13）。但"真的用鼠标拖一次"没法自动化，交互本身未实测。
+- **缩略图**：`res/shadertoy/stpreset` 里没有 `thumbnail.png`，所以界面上一直是"（没有缩略图）"；
+  扫描能识别缩略图路径有单测覆盖，解码路径与通道贴图共用 `TextureLoader`（有测试）。
+- **编辑结果不回写 JSON**（历史）：那时候界面改动只活在内存里；现在没有内存编辑了，
+  想改就改 `project.json` 再点"重新加载"。
+
+### S7-13 界面改为只读：只留一个"重新加载"（按需求调整，已实现）
+
+- **去掉的东西**：pass 代码编辑器（`PassEditor.cs` 整块删除）、通道下拉/采样器/vflip/路径编辑、
+  "应用并重编译"、"还原"、诊断/通道/转译后 GLSL 三个标签页，以及 `Player.ApplyEdits` /
+  `Player.RefreshChannelBindings` 这两个只为编辑存在的入口。
+- **留下/新增**：本地库面板（扫描、下载、删除、收藏、占用、缺资源）、播放控制（暂停/重置/时间轴/
+  截图/全屏/buffer 分辨率）、只读的"通道"折叠面板、pass 列表（只读）、错误面板（含"复制上下文"），
+  外加主控栏一个 **「重新加载」** 按钮。
+- **重新加载 = 从文件重新读入**：`Player.Reload()` 重新解析 `project.json`；
+  与 `LoadFile` 的差别是**失败时保留当前画面**（不回落到演示作品），避免外部编辑器正好写坏文件时丢掉正在看的东西。
+- **坑：不能在 ImGui 帧中途换 GL 资源**。按钮事件发生在 `_ui.Draw()` 里，此刻管线/纹理正在用；
+  所以事件只置一个标志，`Program` 在**下一帧开头**（与拖入 JSON 同一条路径）执行 `ReloadProject`。
+- **坑：主控窗固定占满整列会挡住画面**。去掉编辑器后中间列只剩一块信息面板，
+  现在高度改成自适应内容（`SetNextWindowSize(width, 0)`），画面在面板下方完整可见。
+- **验收实测**：`--selfcheck-reload` 输出 `Reload 成功，代码已从文件恢复 = True`；
+  `--shot` 出图确认布局（库 / 主控 / pass 列表三栏，无编辑器，主控栏有"重新加载"）。
+
+### S7-14 布局再调整：pass 列表挪到左下角、列表顺序固定（按需求调整，已实现）
+
+- **去掉左下角的"选中项详情"块**（缩略图、占用、播放/打开目录/删除/收藏按钮）：库面板只剩
+  「重新扫描 / 导入 JSON… / 过滤 / 列表 / 一行提示」，变矮；这些操作改到列表项的**右键菜单**
+  （播放 / 打开目录 / 收藏 / 删除…→ 弹确认框），平铺布局的项禁用"删除…"。
+- **pass 列表从右栏挪到左下角**（库面板正下方，等高剩余空间，内容可滚动）；右侧整块留给主控窗 +
+  画面，主控窗仍高度自适应内容。
+- **列表顺序在扫描时固定**：
+  - 双击播放**不再触发重扫**：`Player` 记完 `lastPlayed` 后，UI 只把那一项**就地**替换
+    （`LibraryPanel.MarkPlayed`），列表顺序不变（以前重扫会按最近播放把刚播的顶到最上面）；
+  - 隐式重扫（下载/导入/删除/收藏后）用 `Rescan(preserveOrder: true)`：既有作品保持原位置，
+    新增作品排最前；
+  - 只有用户点「重新扫描」才按"最近播放"重排。
+- **坑：右键菜单必须紧跟 `Selectable`**。行尾还有 `SameLine` 的作者/★/缺资源文字，
+  `BeginPopupContextItem` 绑定的是"最后一项"，放在文字后面会导致右键只有点在文字上才生效。
+- **实测**：`--shot` 出图确认为"左列上=库、左列下=pass 列表、右侧=主控 + 画面"；
+  导入 alpha/bravo/charlie 三个作品后播放列表最底部的 bravo，左栏顺序仍是 `alpha, charlie, bravo`
+  （bravo 没有被顶到最前），`meta.json` 里 `lastPlayed` 已更新。
 
 ### S7-2 `System.Text.Json` 在 AOT 下必须用源生成（已确认）
 
@@ -498,42 +623,128 @@
 
 ## S-P8 本地库与下载
 
-### S8-1 页面里的 JSON 是内嵌 JS，不是接口返回（待验证）
+落地代码：`Import/ShaderMeta.cs`（meta.json）、`Import/ShaderToyPage.cs`（页面抠 JSON）、
+`Import/JsonTextRewriter.cs`（原文级路径改写）、`Import/ShaderToyDownloader.cs`（下载编排 + 资源抓取）、
+`Import/LocalJsonImporter.cs`（本地 JSON 导入）、`Import/LocalLibrary.cs`（删除/占用/最近播放）；
+UI 在 `App/Ui/LibraryPanel.cs`（含 `App/FileDialog.cs`），命令行在 `Program.cs`。
 
-- **现象**：没有 API key 时，`https://www.shadertoy.com/view/<id>` 的 HTML 里把工程塞在脚本变量中
-  （形如 `var gShaderToy = {...};`），不是干净的 JSON 响应，还可能带 `&quot;` 之类转义。
-- **对策**：定位 `gShaderToy` 起点后做**括号配对**（考虑字符串与转义）截取，不要用"匹配到 `</script>`"这种硬切；
-  截出来的文本先做 HTML 实体反转义再丢给 `JsonDocument.Parse`。解析失败时把原始片段落盘到 `shaders/_failed/` 便于排查。
+### S8-0 下载/导入的数据流（实现后的真实路径）
 
-### S8-2 资源 URL 必须在保存时改写成相对路径（已确认必要性）
+1. **来源**：下载 = 站点页面内嵌 JSON；导入 = 用户本地的 `.json` 文件（文件名即 ID）。
+2. **校验**：两条路都过同一个容忍型导入器 `ShaderToyJsonImporter`（裸控制字符修复、键名带空格、`id` 数字/字符串混用）。
+3. **资源计划**：扫 `inputs[]` → `texture`（`filepath`/`src`）、`cubemap`（`_0.._5` 六面）、`volume`（跳过下载，仅导入本地面）；
+   同一 URL/源文件只处理一次，目标名固定 `textures/<文件名>`（撞名加 `-序号`）。
+4. **落地**：资源进 `textures/`；`project.json` 用**原文** + `JsonTextRewriter` 只改路径那几处；
+   `meta.json` 记私有信息（来源/时间/收藏/最近播放/缺资源）。
+5. **目录**：`<库>/<id 小写>/`（重名另存 `-<n>`）；扫描以 `project.json` 存在为准，列表按 `lastPlayed` 排序。
+6. **播放**：管线先按"作品目录 + 相对路径"找资源（S8-7），找不到再退回按文件名，仍找不到就用黑纹理并在提示里点出来。
+7. **下载特有**：UA/Referer、并发 ≤4、429/5xx 退避重试 2 次、单资源失败只记 `missingResources`；
+   **实测受限于本机被 Cloudflare 403（S8-8），端到端只验证了导入与"下载失败"路径。**
 
-- **现象**：Shadertoy 的 `inputs[].src` / `filepath` 是 `https://.../media/...` 绝对地址。
-  原样存下来，下次离线加载就会去联网（失败）或拿到 404。
-- **对策**：下载时把资源落到 `textures/`，同时把 JSON 里对应字段改成 `textures/xxx.jpg`；
-  相对路径的基准固定为"作品目录"，这样整个目录可以整体拷走。
-- 注意同一张图被多个 input 引用时**只下载一次**（按 URL 去重）。
+### S8-1 页面里的 JSON 是内嵌 JS，不是接口返回（部分验证：只验了两种形态，没验真站）
 
-### S8-3 `project.json` 必须原样保存（待验证）
+- **现象（待验证，真站访问不到）**：`https://www.shadertoy.com/view/<id>` 把工程塞在脚本变量里
+  （`var gShaderToy = {...};` 或 `gShaderToy = JSON.parse('...')`），还可能带 `&quot;` 之类转义。
+- **实测（本机网络被 Cloudflare 拦，S8-8）**：所有路径（含首页与 `/api/v1/shaders/<id>`）都返回
+  `HTTP 403` + 11 字节 `Bad request`，`Server: cloudflare`；带全套浏览器头（`sec-ch-ua`/`Sec-Fetch-*`/
+  `Accept-Language`/`Referer`）、HTTP/1.1、curl 与 .NET 两条客户端结果一致 —— 不是我们 UA 写错。
+  所以"真站页面长什么样"这条**仍待验证**，用下面的对策 + 夹具测试覆盖已知的两种形态。
+- **对策（已实现）**：定位 `gShaderToy` → 跳过 `=` → 分两路：
+  1. `{`/`[` 开头：**括号配对**（尊重字符串与 `\` 转义），截完再做 HTML 实体反转义；
+  2. `JSON.parse(` 开头：按引号配对取 JS 字符串，再解 JS 转义（`\n` `\t` `\uXXXX`、反斜杠续行）；
+  两条都不通时才尝试"整个页面实体反转义后重来"（`&quot;` 版本的页面）。
+  失败时把原始页面/JSON 落到 `<库>/_failed/<id>-<时间>.html|json`，方便事后比对。
+  绝不能"截到 `</script>`"——GLSL 里什么都可能出现。
 
-- **现象**：如果按我们的模型反序列化再序列化写回，会丢未知字段、改字段顺序，还可能把 `\n` 转义处理错
-  —— 再导入时变成"双重反转义"，代码里出现多余空行或 `\n` 字面量。
-- **对策**：**保存原始文本**（只改写资源路径那几处，做最小侵入的文本替换或用 DOM 保留原节点），
-  私有信息一律写 `meta.json`，让 `project.json` 保持"可直接导回 shadertoy"。
+### S8-2 资源 URL 必须在保存时改写成相对路径（已确认 → 已实现）
 
-### S8-4 下载要带正常 UA，且要限速/重试（待验证）
+- **现象**：`inputs[].filepath` 是站点路径（`/media/a/<hash>.png`，还常写成 `\/media\/a\/...`）。
+- **对策**：下载到 `textures/<文件名>`，把 JSON 里那个**字符串值**改成相对路径；同一 URL 只下一次
+  （按 URL 去重）；文件名撞车时加 `-2`。夹具测试覆盖"改写后不再含 `/media/a/...`"。
 
-- **现象**：CDN 对空 UA / 高频请求可能返回 403 或 429。
-- **对策**：`HttpClient` 设 `User-Agent`、`Referer`；单作品下载并发 ≤4，遇 429 指数退避重试 2 次；
-  单个资源失败只记日志、不中断（缺资源标记进 `meta.json`）。
+### S8-3 `project.json` 必须原样保存（已确认 → 已实现）
 
-### S8-5 目录名只能用 ID（已确认必要性）
+- **做法**：不反序列化重写。`JsonTextRewriter` 只替换"**整段字符串值恰好等于某 URL**"的字面量，
+  其余字节（字段顺序、空白、`\n` 转义）原样不动；匹配前会把 `\/` 解码，所以真实导出的转义写法也能命中。
+- **实测**：重写后的 `project.json` 仍是单行、仍含字面 `\n`、`/media/a/hash.png` 消失，
+  `ShaderToyJsonImporter` 再读回来代码行数与原来一致（`ShaderToyDownloaderTests`）。
 
-- **现象**：作品标题里常有 `:` `?` `*` `/`，直接当目录名在 Windows 上非法；长标题还会顶到 260 字符限制。
-  另外 NTFS 大小写不敏感，`flGyWc` 与 `flgywc` 会指向同一目录。
-- **对策**：目录名固定为小写化的 ID；标题只存在 `meta.json` 与 UI 里；解析输入时 ID 大小写不敏感地回去找目录。
+### S8-4 下载要带正常 UA，且要限速/重试（已实现）
 
-### S8-6 本地库扫描要容忍"手工放进去的作品"（待验证）
+- `HttpClient` 带浏览器 UA、`Referer`、`Accept`、自动解压、30 秒超时；单作品资源并发 4；
+  429 与 5xx 退避重试 2 次（400ms 起）；其余 4xx 直接失败。
+- 单资源失败**不中断**：记进 `meta.json` 的 `missingResources`（含原因），作品照常落地。
 
-- **现象**：用户可能只拷了一个 `project.json` + `textures/` 进 `shaders/`，没有 `meta.json`，也没有缩略图。
-- **对策**：扫描以 `project.json` 存在为准；`meta.json` 缺失时现场用默认值（标题取目录名、作者未知）并**不回写**；
-  缩略图缺失就不显示图，不要生成占位文件污染库目录。
+### S8-5 目录名只能用 ID（已确认 → 已实现）
+
+- 目录固定为 ID 的**小写**形式（`flGyWc` → `shaders/flgywc/`），标题/作者只进 `meta.json`；
+  "另存为副本"生成 `<id>-2`、`<id>-3`…；重复下载同 ID 直接复用同一目录（不再产生第二个）。
+
+### S8-6 本地库扫描要容忍"手工放进去的作品"（已确认 → 已实现）
+
+- 扫描以 `project.json` 存在为准；`meta.json` 缺失时用导入器解析 `info.name/username` 并**不回写**；
+  没有缩略图就不显示图。
+- **实测**：手写一个只有 `project.json` + `textures/` + `meta.json` 的作品目录（无缩略图），
+  `--library <dir> --shader p8test` 能按 ID 解析、正常出帧，`--list` 也能列出。
+
+### S8-7 相对路径的资源必须按"作品目录 + 相对路径"解析（已确认，P8 才发现）
+
+- **现象**：下载后 JSON 里是 `textures/x.png`，而 `ShaderToyPipeline.ResolveTexturePath` 原来只做两件事：
+  `File.Exists(原路径)`（相对当前工作目录，必落空）与"按文件名在搜索目录里找"（`x.png` vs `textures/x.png`，也落空）。
+  不修这条，P8 下载完的作品离线加载会**全黑**，而且只在"下载目录"里复现，很容易被当成下载失败。
+- **对策**：先按"搜索目录 + 整条相对路径"找，再退回文件名匹配。**实测**：同样的工程在
+  `textures/` 子目录下能加载，日志里不再出现"找不到图片"（`--shader p8test --shot`）。
+
+### S8-8 真站访问被 Cloudflare 拦（已确认，本机环境）
+
+- **现象**：`curl` 与 .NET 客户端对 `www.shadertoy.com`（首页、`/view/<id>`、`/api/v1/...`）一律
+  `403` + `Bad request`（`Server: cloudflare`，`CF-RAY` 存在），换 UA/浏览器头/HTTP 版本无效。
+- **结论**：本机网络出口被判为机器人/不可信，**下载功能没法端到端实测**。用户侧要看到真实效果，需要
+  在能直连该站的网络里跑一次 `--download flGyWc`；代码侧的错误路径已走通
+  （`HTTP 403 Forbidden（URL）` + 退出码 1，不再挂起或乱抛异常）。
+- 后续若要绕开：上游那套"登录 shadertoy 拿 cookie"的做法（Boost.Asio+OpenSSL）在本项目里没移植，
+  真要支持需要单独做一个可配置的 Cookie 注入（`--cookie`），属于 P9 之后的事。
+
+### S8-9 UI 侧的下载是异步的（已确认）
+
+- 下载放在 `Task` 上跑，面板每帧只轮询；进度用自写 `IProgress<string>`（不用 `Progress<T>`——它依赖
+  同步上下文，在 GLFW 主循环里回调时机不可控），后台只覆盖一个字符串字段，不碰 ImGui。
+- 完成后自动重扫库并把作品交给 `Program` 加载；取消走 `CancellationTokenSource`。
+- **注意**：删作品只允许"库根下一级、且含 `project.json`"的目录（平铺布局不支持整目录删，
+  右键菜单里该项置灰），防止手滑把库根或示例目录整块删掉（`LocalLibraryTests` 覆盖）。
+  入口在列表项的右键菜单（S7-14 之后，主界面不再有选中项详情面板）。
+
+### S8-10 导入本地 JSON：文件名即 ID（已实现）
+
+- **需求**：不联网也要能把作品放进库；文件名就是 ID。实现 `Import/LocalJsonImporter.cs`，
+  入口是库面板的「导入 JSON…」和命令行 `--import FILE`。
+- **命名**：ID = 文件名（不含扩展名），目录 = `<id 小写>`；文件名里的非法字符只在**目录名**上换成 `_`，
+  `meta.json` 里保留原文件名（`project.json` 的 `info.id` 不参与命名，避免出现"文件叫 a、目录叫 b"）。
+- **资源跟人走**：JSON 里引用的本地文件按"绝对路径 → 相对 JSON 目录 → 同目录同名文件"顺序解析，
+  拷进 `textures/` 并改写 JSON 路径；cubemap 顺带 `_1.._5`。**实测**：
+  `我的作品.json` 引用 `pics/logo.png` → `<库>/我的作品/{project.json, meta.json, textures/logo.png}`，
+  `project.json` 里已变成 `textures/logo.png`，`f\/iResolution` 这类原文转义保持不变。
+- **站点路径留空**：`/media/...`、`http(s)://` 离线拿不到 → 记 `missingResources`，作品仍导入并可播放（黑纹理 + UI 提示）。
+- **自我覆盖防护**：源文件在库根下（重复导入自己的 `project.json`）直接拒绝 —— 否则"覆盖模式"会先建目录再自己拷自己。
+- **文件对话框**：`comdlg32!GetOpenFileNameW`（`App/FileDialog.cs`）。不引 WinForms（AOT 不友好），
+  也不移植上游 nativefiledialog；应用本来就只能在 Windows 跑。对话框是模态的，期间没有 GL 调用。
+- **实测**：`--import` 导入中文文件名作品 → `--list` 显示 ID=文件名 → `--shader <文件名>` 按 ID 播放出图；
+  UI 出图确认「导入 JSON…」按钮与列表项（标题、ID、作者）。
+- **测试**：`LocalJsonImporterTests` 7 个用例（相对/绝对路径改写、站点路径记缺、六面 cubemap、覆盖/另存、坏 JSON、自导入拒绝）。
+
+### S8-11 手工补资源放哪里 + 补齐命令（已实现，推荐用法）
+
+- **位置**：资源放在**作品自己目录**下的 `textures/`，即 `<库>/<作品ID小写>/textures/<文件名>`；
+  **不是**库根的 `shaders/textures/`（那里不会被搜索）。
+  平铺布局（库根直接放 `xxx.json`，如 `res/shadertoy/stpreset/`）时作品目录就是库根，
+  也就是 `<库>/textures/<文件名>`。
+- **文件名**必须和 JSON/URL 里的一致（就是 `https://www.shadertoy.com/media/a/<hash>.png` 的最后一段）。
+- **路径兜底**：`ResolveTexturePath` 第 3 步会在 `<作品目录>/textures/` 里按文件名找，
+  所以 JSON 里还留着 `/media/a/xxx.png` 也能直接用，放完点"重新加载"即可。
+- **清标记**：右键"补齐缺失资源"（CLI `--fetch-missing <id|目录>`）——文件已存在就**不联网**，
+  只把 JSON 改成 `textures/xxx.png` 并从 `meta.json` 的 `missingResources` 里移除。
+  **实测**：手工放好 `textures/<hash>.png` 后跑 `--fetch-missing`，输出"成功 1 个"，JSON 已改写、缺失列表清空。
+- **代理**：`--proxy socks5://127.0.0.1:1080`（也接受裸 `host:port`、`none` 直连）；
+  优先级 命令行 &gt; `MILKDROP_PROXY` &gt; `%APPDATA%\MilkDropShaderToy\settings.json` &gt; 默认 `socks5://127.0.0.1:1080`；
+  界面左侧"代理"一栏可改并持久化。**实测**：故意把端口写错会立刻报"积极拒绝"，说明请求确实走代理。
+  但即便经代理，站点仍对 curl/.NET 这类客户端返回 403（S8-8，需要登录/浏览器指纹），所以自动下载暂时搁置。

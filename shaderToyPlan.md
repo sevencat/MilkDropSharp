@@ -49,7 +49,7 @@
 | `src/app/resources.cpp` | 61 | 简化：stb_image → `StbImageSharp`；省掉 Daxa 上传任务 | `Resources/TextureLoader.cs` |
 | `src/app/ping_pong_resource.hpp` | 92 | 换成 GL 双 FBO + 两张纹理交换 | `Renderer/PingPongTarget.cs` |
 | `src/main.cpp` | 427 | 窗口创建/事件循环/拖放/异常兜底 → 复用 `MilkDrop.ProjectM.App` 的 Program 骨架 | `src/MilkDrop.ShaderToy.App/Program.cs` |
-| `src/ui/*`（RmlUi 面板） | 1471 | **重写为 ImGui**：pass 列表、代码编辑、通道绑定、播放控制、截图（`buffer_panel.cpp` 782 行是主体） | `src/MilkDrop.ShaderToy.App/Ui/*` |
+| `src/ui/*`（RmlUi 面板） | 1471 | **重写为 ImGui**：只读的 pass/通道/错误面板、播放控制、截图（`buffer_panel.cpp` 782 行是主体）；**不做代码编辑**（见 P7 的"后续调整"） | `src/MilkDrop.ShaderToy.App/Ui/*` |
 | `src/rml/*`（RmlUi 的 Daxa/GLFW 后端） | 974 | **不移植** | — |
 | `deps/Daxa`、`deps/glslang` | 数万行 | **不移植** | — |
 | `shadertoy_api/*`（Boost.Asio 抓取） | ~300 | 改成 `HttpClient` 抓 `https://www.shadertoy.com/view/<id>` 页面内嵌 JSON（P8，可选） | `Import/ShaderToyDownloader.cs` |
@@ -83,12 +83,12 @@ src/MilkDrop.ShaderToy/
   Channels/        TextureChannel.cs  BufferChannel.cs  CubeChannel.cs  VolumeChannel.cs  KeyboardChannel.cs  AudioChannel.cs
   Audio/           SoundPassRenderer.cs  AudioEngine.cs  AudioBuffer.cs  MusicTexture.cs  IAudioSink.cs
                    （NAudio 的 WaveOutEvent 实现在 App 层：MilkDrop.ShaderToy.App/WaveOutAudioSink.cs）
-  Import/          ShaderToyJson.cs
-  Library/         LocalLibrary.cs  LibraryEntry.cs  ShaderToyDownloader.cs  AssetFetcher.cs
+  Import/          ShaderToyJsonImporter.cs  ShaderLibrary.cs  ShaderMeta.cs  ShaderToyPage.cs
+                   JsonTextRewriter.cs  ShaderToyDownloader.cs  LocalJsonImporter.cs  LocalLibrary.cs
   Resources/       TextureLoader.cs  FontTexture.cs  BuiltinTextures.cs
 src/MilkDrop.ShaderToy.App/
-  Program.cs  AppOptions.cs  Player.cs
-  Ui/              MainWindow.cs  PassEditor.cs  ChannelPanel.cs  CodeEditor.cs  LibraryPanel.cs
+  Program.cs  AppOptions.cs  Player.cs  FileDialog.cs
+  Ui/              ShaderToyUi.cs  LibraryPanel.cs  UiFonts.cs
 tests/MilkDrop.ShaderToy.Tests/
   TranspileTests.cs  JsonImportTests.cs  KeyboardTextureTests.cs  LibraryTests.cs  SoundPassTests.cs (需要 GPU)
 MilkDrop.ShaderToy.sln
@@ -220,16 +220,47 @@ MilkDrop.ShaderToy.sln
   - 一个 `vec2 mainSound(float time)` 的最简正弦（440Hz A4）也能听到标准音，且频率实测 ≈440Hz（不加任何额外处理直接听起来就是 A 音）；
   - 频谱纹理与听到的声音一致；连续播放 10 分钟无爆音/漂移；采样率与设备不符时有重采样兜底。
 
-### P7 ImGui 界面（中）
+### P7 ImGui 界面（中）· **已落地**（实测记录见 `shaderToyIssue.md` S-P7）
 
-- pass 列表（image/buffer/cube/sound）、每个 pass 的多行代码编辑（`InputTextMultiline`，可选后续接高亮）
-- **本地库列表**：左侧一栏，显示 `shaders/` 里扫到的作品（缩略图 + 标题 + 作者 + ID），双击加载，按名字/作者过滤
-- 通道面板：下拉选类型、拖入图片、采样器 filter/wrap/vflip
-- 播放控制：暂停/重置/时间轴、FPS、分辨率、截图、全屏（复用 `Hotkeys` 的 F11）
+落地时的偏差：本地库列表读的是 `ShaderLibrary`（P8 的读侧提前做了），写侧（下载/导出）仍是 P8；
+其余按本计划实现。界面细节：
+最初的布局是"左侧库 / 中间主控 + 编辑器 / 右侧 pass 列表"，中文字体与等宽字体从系统字体加载（S7-5）。
+（现行布局见下面"后续调整"：左列上=本地库、左列下=pass 列表、右侧=主控，高度自适应。）
+
+**后续调整（P8 之后）：界面改为只读。** 去掉 pass 代码编辑器（`PassEditor.cs` 已删除）、通道下拉/采样器/
+vflip/路径编辑、"应用并重编译"、三个标签页；只保留展示（通道折叠面板、pass 列表、错误面板）+
+主控栏一个 **「重新加载」** 按钮（从 `project.json` 重新读入，失败时保留当前画面）。
+因此本节"界面里改代码 → 生效"这条验收作废，改由 `--selfcheck-reload` 覆盖
+（内存改代码 → 重新加载 → 代码必须恢复成文件内容）。实测见 `shaderToyIssue.md` S7-13。
+
+**现行布局（再调整）**：左列上 = 本地库（只留列表，取消"选中项详情"块，播放/打开目录/收藏/删除进右键菜单）+
+左列下 = pass 列表；右侧 = 主控（高度自适应内容）；画面占其余区域。
+**列表顺序在扫描时就固定**：播放只就地更新"最近播放"，不重排；隐式重扫（下载/导入/删除）保持既有顺序、
+新增作品排最前；只有"重新扫描"按钮按最近播放重排。
+
+- pass 列表（image/buffer/cube/sound）——**只读**，不再提供多行代码编辑
+- **本地库列表**：左列上半，显示扫到的作品（标题 + 作者 + ID + 缺资源/收藏标记），双击播放，右键菜单管理
+- 通道面板：**只读**展示每个 pass 的 `i0..i3`（类型、目标、filter/wrap/vflip）
+- 播放控制：暂停/重置/时间轴、FPS、分辨率、截图、全屏（复用 `Hotkeys` 的 F11）、**重新加载**
 - 错误面板：编译失败时把 GLSL 日志 + 行号显示出来（这是日常最常用的功能）
-- **验收**：不改 JSON、只在界面里改代码 → 重新编译并生效；从左侧列表点一个本地作品直接播放；拖入一个 shadertoy JSON 直接播放。
+- **验收**：从左侧列表双击一个本地作品直接播放；拖入一个 shadertoy JSON 直接播放；
+  外部改 `project.json` 后点"重新加载"，改动生效（原"界面里改代码"的验收已随编辑功能一起取消）。
 
-### P8 本地库、下载与导入导出（中）
+### P8 本地库、下载与导入导出（中）· **已落地**（实测记录见 `shaderToyIssue.md` S-P8）
+
+落地时的偏差：
+
+- 写侧代码全部放在 `Import/`（与 `ShaderLibrary` 同目录），没有再单开 `Library/`：
+  `ShaderMeta.cs`（meta.json 读写）、`ShaderToyPage.cs`（页面抠 JSON）、`JsonTextRewriter.cs`（原文级路径改写）、
+  `ShaderToyDownloader.cs`（下载编排 + 资源抓取）、`LocalLibrary.cs`（删除/占用/最近播放）。
+- **"导出"没有单独做**：`project.json` 本来就是原样保存的上游文本（只改了资源路径），拷出去即可导回 shadertoy；
+  真正需要导出的只有 meta 里的私有信息，而那部分刻意不进 project.json。
+- volume 资源**没下载**：`inputs[].id` 只是资源标识，站点没有可靠的下载 URL 约定；下载时记一条提示，
+  绑定侧仍是占位纹理（S-P8）。
+- 命令行额外加了 `--list`、`--download <id|url>`、`--import FILE`、`--as-copy`，`--shader` 现在也接受作品 ID（不只是文件路径）。
+- 顺带修了渲染侧的一个真问题：下载后 JSON 里是相对路径 `textures/xxx.jpg`，而管线原来只按"文件名"在搜索目录里找，
+  离线加载会全部落空 —— `ResolveTexturePath` 现在先按"作品目录 + 相对路径"找（`shaderToyIssue.md` S8-7）。
+- 补了**本地 JSON 导入**（文件名即 ID），见本节末尾。
 
 **目录布局（每个作品一个独立子目录，按 ID 命名）**
 
@@ -260,16 +291,35 @@ shaders/                          ← 本地库根（默认 exe 旁，可用 --l
 
 - 启动扫 `shaders/*/project.json` 建索引（只读 `meta.json` + 文件大小，不快照读全部代码），列表按最近播放排序。
 - 同名 ID 再次下载：默认覆盖 `project.json`/`meta.json`，资源按需增量（已存在且非空则跳过）；UI 提供"另存为 `<id>-2`"。
-- 删除：UI 里删整目录（二次确认）；显示每个作品占用空间。
+- 删除：列表右键菜单删整目录（弹确认框；平铺布局不提供）；占用空间在悬停提示里显示。
 - 命令行：`--shader <id|路径>` 直接播；`--library DIR` 指定库根；`--list` 打印库内容。
 - 手工放进去的作品（拷一个 `project.json` + `textures/`）也要能被扫到 —— 不依赖 `meta.json`，缺失就现场生成默认值。
+
+**导入本地 JSON（文件名即 ID）**
+
+- 入口：左侧库的 **「导入 JSON…」**（comdlg32 的 `GetOpenFileNameW`，不引 WinForms/nativefiledialog）+ 命令行 `--import FILE`。
+  `--as-copy` 对导入同样生效（同名另存为 `<id>-2`）。
+- ID = **文件名（不含扩展名）**，目录 = `<id 小写>`；文件名里的非法字符在目录名上换成 `_`，
+  `meta.json` 里保留原名（`project.json` 的 `info.id` 不参与命名）。
+- 资源：JSON 里引用的**本地文件**（绝对路径，或相对 JSON 所在目录的路径，或同目录同名文件）一起拷进 `textures/`，
+  并把 JSON 里的路径改写成相对路径；cubemap 自动带上同目录的 `_1.._5` 六面。
+- 站点路径（`/media/...`、`http(s)://`）离线拿不到 → 记进 `missingResources`，作品照样导入（缺的通道用黑纹理）。
+- 源文件已在库根下的（比如重复导入 `shaders/x/project.json`）直接拒绝，避免自我覆盖。
+- **手工补资源**：站点要登录才能拿图（curl/.NET 均被 Cloudflare 403），所以支持"自己下载好丢进去"：
+  放到 `<库>/<id>/textures/<文件名>`（平铺布局就是 `<库>/textures/`）；`ResolveTexturePath` 会按文件名兜底，
+  JSON 里仍是 `/media/a/xxx.png` 也能用。想同时把 JSON 改成相对路径并清掉"缺资源"标记 →
+  右键"补齐缺失资源"（文件已在就不联网）或 `--fetch-missing <id|目录>`。
+- **代理**：下载/补齐都走可配置代理，默认 `socks5://127.0.0.1:1080`；
+  `--proxy URL` / `MILKDROP_PROXY` / `%APPDATA%\MilkDropShaderToy\settings.json` / 界面"代理"一栏。
 
 - **验收**：
   - 输入 `flGyWc` → 下载完成 → 断网重启程序 → 仍能从本地库加载并正常播放（含它用到的纹理）；
   - 目录里只有 `project.json` 也能被识别；
   - 下载一个带 cubemap 的作品，6 面资源齐全；
   - 故意让某个纹理 URL 404，作品仍能加载、UI 提示缺资源；
-  - 重复下载同 ID 不产生重复目录。
+  - 重复下载同 ID 不产生重复目录；
+  - 导入一个 `lunchbreak.json` + 旁边的 `img/hash.png` → 库目录为 `lunchbreak/`，图片落到 `textures/`，
+    路径已改写，能直接播放（含中文文件名）。
 
 ### P9 验证与 AOT（中）
 
@@ -312,7 +362,7 @@ Boost.Asio/OpenSSL 登录 —— **合计约 2.4k 行 C++ 加两个第三方依�
 | 转译规则做成"字符串替换"式补丁堆 | 后续难维护 | 规则集中在 `ShaderToyTranspiler`，每条规则带单测（输入/输出片段对照） |
 | Sound pass 回读造成 GPU 同步 | 帧率抖动 | 批量渲染 + 环形缓冲，回读放在每 N 帧；用 `PBO` 异步回读兜底 |
 | 音频输出与画面不同步 | 听感/可视化错位 | 用音频时钟驱动 `iTime`（可选），或至少做漂移补偿 |
-| ImGui 代码编辑器体验差 | 编辑长 shader 难受 | P7 先用 `InputTextMultiline`，后续再评估接 `ImGuiColorTextEdit` |
+| ~~ImGui 代码编辑器体验差~~ | ~~编辑长 shader 难受~~ | **已规避**：界面不做编辑，改用外部编辑器 + "重新加载"（S7-13） |
 
 ## 8. 与其它两条线的关系
 

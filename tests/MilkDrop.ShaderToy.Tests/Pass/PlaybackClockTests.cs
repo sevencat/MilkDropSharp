@@ -59,6 +59,34 @@ public sealed class PlaybackClockTests
     }
 
     [Fact]
+    public void Seek_JumpsToTimeAndRestartsFrameCounter()
+    {
+        var clock = new PlaybackClock();
+        clock.Advance(0.3);
+        clock.Advance(0.3);
+
+        clock.Seek(12.5);
+
+        Assert.Equal(12.5f, clock.Time, 4);
+        Assert.Equal(0, clock.Frame);          // iFrame 重新计数（有些作品拿它当随机种子）
+        Assert.Equal(0f, clock.TimeDelta);
+
+        clock.Advance(0.1);
+        Assert.Equal(12.6f, clock.Time, 4);
+        Assert.Equal(1, clock.Frame);
+    }
+
+    [Fact]
+    public void Seek_ClampsNegativeToZero()
+    {
+        var clock = new PlaybackClock();
+
+        clock.Seek(-3);
+
+        Assert.Equal(0f, clock.Time);
+    }
+
+    [Fact]
     public void Reset_ClearsTimeAndFrameButKeepsPaused()
     {
         var clock = new PlaybackClock();
