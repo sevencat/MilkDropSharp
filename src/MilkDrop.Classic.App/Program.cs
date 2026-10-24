@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using ImGuiNET;
 using MilkDrop.Classic.Render.D3D9;
@@ -8,6 +9,7 @@ using MilkDrop.Classic.Visualizer.Sprites;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.Windowing;
+using Silk.NET.Windowing.Glfw;
 
 namespace MilkDrop.Classic.App;
 
@@ -92,6 +94,17 @@ internal static class Program
         TryEnableDpiAwareness();
 
         var options = AppOptions.Parse(args);
+
+        // 显式注册 GLFW 后端。Silk.NET 默认靠扫描已加载程序集发现平台，
+        // Native AOT 下这条发现路径被裁掉，不写会抛 "Couldn't find a suitable window platform"。
+        GlfwWindowing.Use();
+
+        // 输入后端同理：AOT 下 Silk.NET 扫不到 IInputPlatform（GlfwInputPlatform 是 internal，
+        // 没法直接 Add），只能按程序集名让它自己注册；对应程序集在 csproj 里用 TrimmerRootAssembly 保住。
+        if (!InputWindowExtensions.TryAdd("Silk.NET.Input.Glfw"))
+        {
+            Console.WriteLine("警告：GLFW 输入后端注册失败，键鼠输入不可用。");
+        }
 
         var windowOptions = WindowOptions.Default with
         {
@@ -439,6 +452,15 @@ internal static class Program
     {
         if (options.Audio == "none")
         {
+            return new SilenceAudioSource();
+        }
+
+        // NAudio 的 CoreAudioApi 靠 [ComImport] 的 coclass（MMDeviceEnumeratorComObject）建对象，
+        // Native AOT 不支持这种 COM 激活（ILC 直接把构造函数编译成 throw），所以 AOT 构建里
+        // 连试都别试，直接静音：否则每帧都是空的，日志里还多一条 "invalid program"。
+        if (!RuntimeFeature.IsDynamicCodeCompiled)
+        {
+            Console.WriteLine("Native AOT 构建：NAudio 的 WASAPI 回环不可用（COM 激活不支持），音频退回静音。");
             return new SilenceAudioSource();
         }
 

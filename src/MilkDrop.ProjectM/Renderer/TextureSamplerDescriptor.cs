@@ -31,6 +31,11 @@ public sealed class TextureSamplerDescriptor
         SamplerName = samplerName;
         SizeName = sizeName;
 
+        // uniform 名在构造时拼好：这几行在热路径上（每个带纹理的预设每帧都走）。
+        _samplerUniformName = "sampler_" + samplerName;
+        _texSizeUniformName = "texsize_" + sizeName;
+        _shortTexSizeUniformName = IsShortRandomName(sizeName) ? "texsize_" + sizeName[..6] : null;
+
         if (texture is not null)
         {
             Texture = texture;
@@ -38,6 +43,12 @@ public sealed class TextureSamplerDescriptor
     }
 
     private WeakReference<Texture>? _textureReference;
+
+    private readonly string _samplerUniformName = string.Empty;
+
+    private readonly string _texSizeUniformName = string.Empty;
+
+    private readonly string? _shortTexSizeUniformName;
 
     /// <summary>纹理（可能为 null / 空）。</summary>
     public Texture? Texture
@@ -102,7 +113,7 @@ public sealed class TextureSamplerDescriptor
 
         Texture.Bind(unit, Sampler);
 
-        shader.SetUniformInt("sampler_" + SamplerName, unit);
+        shader.SetUniformInt(_samplerUniformName, unit);
 
         // 不同 wrap/filter 组合可能重复设置，但极少发生。
         var texSize = new Vector4(
@@ -111,12 +122,12 @@ public sealed class TextureSamplerDescriptor
             1f / Texture.Width,
             1f / Texture.Height);
 
-        shader.SetUniformFloat4("texsize_" + SizeName, texSize);
+        shader.SetUniformFloat4(_texSizeUniformName, texSize);
 
         // 带前缀的随机纹理：额外提供短名 texsize_randNN。
-        if (IsShortRandomName(SizeName))
+        if (_shortTexSizeUniformName is not null)
         {
-            shader.SetUniformFloat4("texsize_" + SizeName[..6], texSize);
+            shader.SetUniformFloat4(_shortTexSizeUniformName, texSize);
         }
     }
 

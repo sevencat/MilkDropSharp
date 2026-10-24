@@ -3,11 +3,45 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>MilkDrop.Classic.App</RootNamespace>
     <AssemblyName>MilkDrop.Classic</AssemblyName>
+    <!--
+      Native AOT：项目里没有 Reflection.Emit / 动态加载（EEL 走 MilkDrop.Eval 的解释器，
+      D3D9 走 Vortice 的 P/Invoke+COM，UI 走 ImGui.NET 的 P/Invoke），所以可以整包提前编译。
+      发布：dotnet publish src\MilkDrop.Classic.App -c Release -r win-x64
+      （RuntimeIdentifiers 只声明可选 RID，不写死，这样日常 dotnet build 仍然是 RID 无关的。）
+    -->
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- Vortice.Direct3D9 的 COM 调用在 AOT 下走内建 COM 互操作，不走运行时动态封送 -->
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- 只用 Ordinal 比较 / InvariantCulture 解析，不需要 ICU 数据（省掉 20+ MB） -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <DebugType>none</DebugType>
+    <!-- 发布目录只要 exe + 原生 dll（AOT 不需要被引用项目的 pdb） -->
+    <AllowedReferenceRelatedFileExtensions>.xml</AllowedReferenceRelatedFileExtensions>
+    <!--
+      Silk.NET 自带的、已确认不影响运行的分析警告：
+      IL2104 — Windowing.Common / Input.Common 内部 trim 警告的汇总条目
+      IL2072 — 平台对象用 Activator.CreateInstance 创建，对应程序集已用 TrimmerRootAssembly 保住
+      IL3000/IL3002 — native 库查找用到 Assembly.Location / DependencyContext，
+                      仅在 single-file 场景失效；本项目不发布 single-file
+    -->
+    <NoWarn>$(NoWarn);IL2104;IL2072;IL3000;IL3002</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <!--
+      Silk.NET 的输入后端是靠"按程序集名找 IInputPlatform"注册的（GlfwInputPlatform 是 internal，
+      没法直接 new），Native AOT 会把整个未被静态引用的程序集裁掉，这里整包保留。
+    -->
+    <TrimmerRootAssembly Include="Silk.NET.Input.Glfw" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
+    <!-- AOT 下不能被裁剪：GlfwWindowing.Use() 是静态引用，显式列出以防将来元包改依赖 -->
+    <PackageReference Include="Silk.NET.Windowing.Glfw" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Input.Glfw" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="StbImageSharp" Version="2.30.15" />

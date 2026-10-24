@@ -73,6 +73,40 @@ public sealed class MilkdropShader : IDisposable
     private readonly Vector3[] _randRotationCenters = new Vector3[20];
     private readonly Vector3[] _randRotationSpeeds = new Vector3[20];
 
+    /// <summary>24 个 <c>rot_*</c> 矩阵的复用缓冲（每帧重算，不重新分配）。</summary>
+    private readonly float[][] _transformMatrices = CreateMatrixBuffers(24);
+
+    private readonly float[] _scratchMatrixA = new float[16];
+    private readonly float[] _scratchMatrixB = new float[16];
+
+    private static readonly string[] MatrixUniformNames =
+    [
+        "rot_s1", "rot_s2", "rot_s3", "rot_s4",
+        "rot_d1", "rot_d2", "rot_d3", "rot_d4",
+        "rot_f1", "rot_f2", "rot_f3", "rot_f4",
+        "rot_vf1", "rot_vf2", "rot_vf3", "rot_vf4",
+        "rot_uf1", "rot_uf2", "rot_uf3", "rot_uf4",
+        "rot_rand1", "rot_rand2", "rot_rand3", "rot_rand4",
+    ];
+
+    /// <summary>q1..q64 对应的 uniform 名（每 4 个一组，<see cref="Constants.QVarCount"/> / 4 组）。</summary>
+    private static readonly string[] QUniformNames =
+    [
+        "_qa", "_qb", "_qc", "_qd", "_qe", "_qf", "_qg", "_qh",
+        "_qi", "_qj", "_qk", "_ql", "_qm", "_qn", "_qo", "_qp",
+    ];
+
+    private static float[][] CreateMatrixBuffers(int count)
+    {
+        var buffers = new float[count][];
+        for (int i = 0; i < count; i++)
+        {
+            buffers[i] = new float[16];
+        }
+
+        return buffers;
+    }
+
     /// <summary>GL program，第一次用到时才创建（无 GL 上下文时也能单测文本流程）。</summary>
     private Shader? _shader;
 
@@ -409,7 +443,7 @@ public sealed class MilkdropShader : IDisposable
         shader.SetUniformFloat4("_c13", new Vector4(blurMin[1], blurMax[1], blurMin[2], blurMax[2]));
 
         // 24 个随机变换矩阵：前 20 个每个预设固定（随时间旋转），后 4 个每帧全随机。
-        var tempMatrices = new float[24][];
+        float[][] tempMatrices = _transformMatrices;
 
         for (int i = 0; i < 20; i++)
         {
@@ -417,35 +451,28 @@ public sealed class MilkdropShader : IDisposable
             float ry = _randRotationCenters[i].Y + _randRotationSpeeds[i].Y * floatTime;
             float rz = _randRotationCenters[i].Z + _randRotationSpeeds[i].Z * floatTime;
 
-            tempMatrices[i] = ComposeRandomMatrix(_randTranslation[i].X, _randTranslation[i].Y, _randTranslation[i].Z, rx, ry, rz);
+            ComposeRandomMatrix(tempMatrices[i], _randTranslation[i].X, _randTranslation[i].Y, _randTranslation[i].Z, rx, ry, rz);
         }
 
         for (int i = 20; i < 24; i++)
         {
-            tempMatrices[i] = ComposeRandomMatrix(FloatRand(), FloatRand(), FloatRand(),
-                                                  FloatRand() * 6.28f, FloatRand() * 6.28f, FloatRand() * 6.28f);
+            ComposeRandomMatrix(tempMatrices[i], FloatRand(), FloatRand(), FloatRand(),
+                                FloatRand() * 6.28f, FloatRand() * 6.28f, FloatRand() * 6.28f);
         }
 
-        ReadOnlySpan<string> matrixNames =
-        [
-            "rot_s1", "rot_s2", "rot_s3", "rot_s4",
-            "rot_d1", "rot_d2", "rot_d3", "rot_d4",
-            "rot_f1", "rot_f2", "rot_f3", "rot_f4",
-            "rot_vf1", "rot_vf2", "rot_vf3", "rot_vf4",
-            "rot_uf1", "rot_uf2", "rot_uf3", "rot_uf4",
-            "rot_rand1", "rot_rand2", "rot_rand3", "rot_rand4",
-        ];
-
-        for (int i = 0; i < matrixNames.Length; i++)
+        for (int i = 0; i < MatrixUniformNames.Length; i++)
         {
             // GLSL mat3x4 = 前 3 列的 12 个 float。
-            shader.SetUniformMat3x4(matrixNames[i], tempMatrices[i].AsSpan(0, 12));
+            shader.SetUniformMat3x4(MatrixUniformNames[i], tempMatrices[i].AsSpan(0, 12));
         }
 
         // _qa.x.._qa.w / _qb... 对应 q1..q32。
         for (int i = 0; i < Constants.QVarCount; i += 4)
         {
-            string variableName = "_q" + (char)('a' + i / 4);
+            int group = i / 4;
+            string variableName = group < QUniformNames.Length
+                ? QUniformNames[group]
+                : "_q" + (char)('a' + group);
             shader.SetUniformFloat4(variableName, new Vector4(
                 (float)presetState.FrameQVariables[i],
                 (float)presetState.FrameQVariables[i + 1],
@@ -713,19 +740,26 @@ public sealed class MilkdropShader : IDisposable
     /// 拼出 <c>rotationY * rotationZ * translation * rotationX</c>（列主序），
     /// 与 C++ 里 <c>tempMatrices[i] = randomTranslation * rotationX; tempMatrices[i] = rotationZ * ...</c> 的顺序一致。
     /// </summary>
-    private static float[] ComposeRandomMatrix(float translateX, float translateY, float translateZ,
-                                               float rotX, float rotY, float rotZ)
+    private void ComposeRandomMatrix(float[] destination, float translateX, float translateY, float translateZ,
+                                     float rotX, float rotY, float rotZ)
     {
-        float[] matrix = MultiplyColumnMajor(Translation(translateX, translateY, translateZ), RotationX(rotX));
-        matrix = MultiplyColumnMajor(RotationZ(rotZ), matrix);
-        return MultiplyColumnMajor(RotationY(rotY), matrix);
+        float[] scratchA = _scratchMatrixA;
+        float[] scratchB = _scratchMatrixB;
+
+        WriteTranslation(scratchA, translateX, translateY, translateZ);
+        WriteRotationX(scratchB, rotX);
+        MultiplyColumnMajor(destination, scratchA, scratchB);
+
+        WriteRotationZ(scratchA, rotZ);
+        MultiplyColumnMajor(scratchB, scratchA, destination);
+
+        WriteRotationY(scratchA, rotY);
+        MultiplyColumnMajor(destination, scratchA, scratchB);
     }
 
-    /// <summary>列主序 4x4 相乘：<c>result = a * b</c>。</summary>
-    private static float[] MultiplyColumnMajor(float[] a, float[] b)
+    /// <summary>列主序 4x4 相乘：<c>destination = a * b</c>（destination 不能与 a/b 相同）。</summary>
+    private static void MultiplyColumnMajor(float[] destination, float[] a, float[] b)
     {
-        var result = new float[16];
-
         for (int column = 0; column < 4; column++)
         {
             for (int row = 0; row < 4; row++)
@@ -736,61 +770,98 @@ public sealed class MilkdropShader : IDisposable
                     sum += a[k * 4 + row] * b[column * 4 + k];
                 }
 
-                result[column * 4 + row] = sum;
+                destination[column * 4 + row] = sum;
             }
         }
-
-        return result;
     }
 
-    private static float[] Translation(float x, float y, float z) =>
-    [
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        x, y, z, 1,
-    ];
+    private static void WriteTranslation(float[] matrix, float x, float y, float z)
+    {
+        matrix[0] = 1;
+        matrix[1] = 0;
+        matrix[2] = 0;
+        matrix[3] = 0;
+        matrix[4] = 0;
+        matrix[5] = 1;
+        matrix[6] = 0;
+        matrix[7] = 0;
+        matrix[8] = 0;
+        matrix[9] = 0;
+        matrix[10] = 1;
+        matrix[11] = 0;
+        matrix[12] = x;
+        matrix[13] = y;
+        matrix[14] = z;
+        matrix[15] = 1;
+    }
 
-    private static float[] RotationX(float angle)
+    private static void WriteRotationX(float[] matrix, float angle)
     {
         float c = MathF.Cos(angle);
         float s = MathF.Sin(angle);
 
-        return
-        [
-            1, 0, 0, 0,
-            0, c, s, 0,
-            0, -s, c, 0,
-            0, 0, 0, 1,
-        ];
+        matrix[0] = 1;
+        matrix[1] = 0;
+        matrix[2] = 0;
+        matrix[3] = 0;
+        matrix[4] = 0;
+        matrix[5] = c;
+        matrix[6] = s;
+        matrix[7] = 0;
+        matrix[8] = 0;
+        matrix[9] = -s;
+        matrix[10] = c;
+        matrix[11] = 0;
+        matrix[12] = 0;
+        matrix[13] = 0;
+        matrix[14] = 0;
+        matrix[15] = 1;
     }
 
-    private static float[] RotationY(float angle)
+    private static void WriteRotationY(float[] matrix, float angle)
     {
         float c = MathF.Cos(angle);
         float s = MathF.Sin(angle);
 
-        return
-        [
-            c, 0, -s, 0,
-            0, 1, 0, 0,
-            s, 0, c, 0,
-            0, 0, 0, 1,
-        ];
+        matrix[0] = c;
+        matrix[1] = 0;
+        matrix[2] = -s;
+        matrix[3] = 0;
+        matrix[4] = 0;
+        matrix[5] = 1;
+        matrix[6] = 0;
+        matrix[7] = 0;
+        matrix[8] = s;
+        matrix[9] = 0;
+        matrix[10] = c;
+        matrix[11] = 0;
+        matrix[12] = 0;
+        matrix[13] = 0;
+        matrix[14] = 0;
+        matrix[15] = 1;
     }
 
-    private static float[] RotationZ(float angle)
+    private static void WriteRotationZ(float[] matrix, float angle)
     {
         float c = MathF.Cos(angle);
         float s = MathF.Sin(angle);
 
-        return
-        [
-            c, s, 0, 0,
-            -s, c, 0, 0,
-            0, 0, 1, 0,
-            0, 0, 0, 1,
-        ];
+        matrix[0] = c;
+        matrix[1] = s;
+        matrix[2] = 0;
+        matrix[3] = 0;
+        matrix[4] = -s;
+        matrix[5] = c;
+        matrix[6] = 0;
+        matrix[7] = 0;
+        matrix[8] = 0;
+        matrix[9] = 0;
+        matrix[10] = 1;
+        matrix[11] = 0;
+        matrix[12] = 0;
+        matrix[13] = 0;
+        matrix[14] = 0;
+        matrix[15] = 1;
     }
 
     private static void AddDeclaration(ISet<string> declarations, string declaration)

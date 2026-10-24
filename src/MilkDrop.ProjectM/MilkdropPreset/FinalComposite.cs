@@ -417,18 +417,15 @@ public sealed class FinalComposite : RenderItem
                 float x = vertex.X * 0.5f + 0.5f;
                 float y = vertex.Y * 0.5f + 0.5f;
 
-                var color = new float[3];
-                for (var col = 0; col < 3; col++)
-                {
-                    color[col] = shade[0, col] * x * y +
-                                 shade[1, col] * (1 - x) * y +
-                                 shade[2, col] * x * (1 - y) +
-                                 shade[3, col] * (1 - x) * (1 - y);
-                }
+                // 每个顶点直接算三个分量，不要每顶点 new 一个 float[3]（网格 32x24 时就是 768 次分配/帧）。
+                float w0 = x * y;
+                float w1 = (1 - x) * y;
+                float w2 = x * (1 - y);
+                float w3 = (1 - x) * (1 - y);
 
-                vertex.R = color[0];
-                vertex.G = color[1];
-                vertex.B = color[2];
+                vertex.R = shade[0, 0] * w0 + shade[1, 0] * w1 + shade[2, 0] * w2 + shade[3, 0] * w3;
+                vertex.G = shade[0, 1] * w0 + shade[1, 1] * w1 + shade[2, 1] * w2 + shade[3, 1] * w3;
+                vertex.B = shade[0, 2] * w0 + shade[1, 2] * w1 + shade[2, 2] * w2 + shade[3, 2] * w3;
                 vertex.A = 1.0f;
             }
         }

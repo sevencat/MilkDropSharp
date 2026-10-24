@@ -19,12 +19,16 @@ public readonly record struct GlslVersion(int Major, int Minor);
 /// <remarks>
 /// <para>对应 <c>Renderer/Shader.hpp:47-193</c> 与 <c>Shader.cpp:10-248</c>。</para>
 /// <para>
-/// 与 4.1.8 一致：不做 uniform location 缓存，每次设置都查一次（预设里 uniform 数量不大，
-/// 且 shader 可能被重新链接）。
+/// 与 4.1.8 的差异：C++ 每次设置 uniform 都调 <c>glGetUniformLocation</c>。热路径上一个预设每帧要设
+/// 上百个 uniform（warp/composite 的 <c>_c0.._c13</c>、24 个 <c>rot_*</c>、<c>_qa.._qh</c>、每个形状实例的
+/// 变换矩阵…），每次都查一遍要走驱动侧字符串查找 + ANSI 封送。这里按名字缓存 location，
+/// 重新链接时整体失效。
 /// </para>
 /// </remarks>
 public sealed class Shader : IDisposable
 {
+    private readonly Dictionary<string, int> _uniformLocations = new(StringComparer.Ordinal);
+
     private uint _shaderProgram;
 
     public Shader()
@@ -41,6 +45,9 @@ public sealed class Shader : IDisposable
     {
         var vertexShader = CompileShader(vertexShaderSource, GLEnum.VertexShader);
         var fragmentShader = CompileShader(fragmentShaderSource, GLEnum.FragmentShader);
+
+        // 重新链接后 uniform 布局可能全变，缓存整体作废。
+        _uniformLocations.Clear();
 
         var gl = GlContext.Gl;
         gl.AttachShader(_shaderProgram, vertexShader);
@@ -97,7 +104,7 @@ public sealed class Shader : IDisposable
 
     public void SetUniformFloat(string uniform, float value)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -108,7 +115,7 @@ public sealed class Shader : IDisposable
 
     public void SetUniformInt(string uniform, int value)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -119,7 +126,7 @@ public sealed class Shader : IDisposable
 
     public void SetUniformFloat2(string uniform, Vector2 values)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -130,7 +137,7 @@ public sealed class Shader : IDisposable
 
     public void SetUniformInt2(string uniform, int x, int y)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -141,7 +148,7 @@ public sealed class Shader : IDisposable
 
     public void SetUniformFloat3(string uniform, Vector3 values)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -152,7 +159,7 @@ public sealed class Shader : IDisposable
 
     public void SetUniformInt3(string uniform, int x, int y, int z)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -163,7 +170,7 @@ public sealed class Shader : IDisposable
 
     public void SetUniformFloat4(string uniform, Vector4 values)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -174,7 +181,7 @@ public sealed class Shader : IDisposable
 
     public void SetUniformInt4(string uniform, int x, int y, int z, int w)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -186,7 +193,7 @@ public sealed class Shader : IDisposable
     /// <summary>设置 3x4 矩阵（GLSL <c>mat3x4</c>，列主序）。</summary>
     public void SetUniformMat3x4(string uniform, ReadOnlySpan<float> values)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -198,7 +205,7 @@ public sealed class Shader : IDisposable
     /// <summary>设置 4x4 矩阵（GLSL <c>mat4</c>，列主序）。</summary>
     public void SetUniformMat4x4(string uniform, ReadOnlySpan<float> values)
     {
-        var location = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        int location = GetLocation(uniform);
         if (location < 0)
         {
             return;
@@ -253,6 +260,18 @@ public sealed class Shader : IDisposable
         }
 
         return new GlslVersion(major, minor);
+    }
+
+    /// <summary>取 uniform location（首次查驱动，之后走缓存；不存在的不再重复查）。</summary>
+    private int GetLocation(string uniform)
+    {
+        ref int cached = ref CollectionsMarshal.GetValueRefOrAddDefault(_uniformLocations, uniform, out bool exists);
+        if (!exists)
+        {
+            cached = GlContext.Gl.GetUniformLocation(_shaderProgram, uniform);
+        }
+
+        return cached;
     }
 
     public void Dispose()
