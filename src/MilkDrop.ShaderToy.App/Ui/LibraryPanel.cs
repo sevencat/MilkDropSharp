@@ -134,7 +134,8 @@ internal sealed class LibraryPanel : IDisposable
         ImGui.SetNextWindowPos(new Vector2(0, 0), cond);
         ImGui.SetNextWindowSize(size, cond);
 
-        if (!ImGui.Begin("本地库", ImGuiWindowFlags.NoCollapse))
+        // 不加 NoCollapse：标题栏可以像右侧主控那样折叠起来
+        if (!ImGui.Begin("本地库"))
         {
             ImGui.End();
             return null;

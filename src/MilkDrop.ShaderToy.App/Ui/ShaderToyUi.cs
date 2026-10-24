@@ -121,8 +121,8 @@ internal sealed class ShaderToyUi : IDisposable
 
         float libraryWidth = LibraryWidth * _scale;
 
-        // 左列上下分：上面"本地库"，下面"pass 列表"（原右侧面板挪到左下角）
-        float libraryHeight = Math.Clamp(height * 0.58f, 240f * _scale, Math.Max(240f * _scale, height - 200f * _scale));
+        // 左列只有"本地库"，占满整列高度；窗口标题栏可折叠（和右侧主控一样）
+        float libraryHeight = Math.Max(240f * _scale, height);
 
         ShaderLibraryEntry? open = _library.Draw(new Vector2(libraryWidth, libraryHeight), cond);
 
@@ -131,14 +131,13 @@ internal sealed class ShaderToyUi : IDisposable
             OpenRequested?.Invoke(open.ProjectPath);
         }
 
-        // 布局：左=库+pass 列表，右=主控（高度自适应内容，画面在它下面完整可见）
+        // 布局：左=库，右=主控（高度自适应内容，画面在它下面完整可见）
         float centerWidth = Math.Max(520f * _scale, width - libraryWidth);
 
         ImGui.SetNextWindowPos(new Vector2(libraryWidth, 0), cond);
         ImGui.SetNextWindowSize(new Vector2(centerWidth, 0), cond);
         DrawMainWindow(width, height, fps, imguiCapturesKeyboard);
 
-        DrawPassListWindow(libraryWidth, libraryHeight, height, cond);
         DrawToast();
     }
 
@@ -407,65 +406,6 @@ internal sealed class ShaderToyUi : IDisposable
         {
             ImGui.TextDisabled("音频: " + audioError);
         }
-    }
-
-    private void DrawPassListWindow(float leftWidth, float topOffset, int height, ImGuiCond cond)
-    {
-        // 左下角小窗：pass 快照（只读，点不动 —— 界面不编辑作品）
-        ImGui.SetNextWindowPos(new Vector2(0f, topOffset), cond);
-        ImGui.SetNextWindowSize(new Vector2(leftWidth, Math.Max(120f, height - topOffset)), cond);
-
-        if (!ImGui.Begin("pass 列表", ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.End();
-            return;
-        }
-
-        if (_player.Project is not { } project || project.Passes.Count == 0)
-        {
-            ImGui.TextDisabled("（空）");
-            ImGui.End();
-            return;
-        }
-
-        float footer = ImGui.GetTextLineHeightWithSpacing() * 2f;
-        if (ImGui.BeginChild("##pass-list", new Vector2(0, -footer)))
-        {
-            foreach (ShaderPass pass in project.Passes)
-            {
-                bool failed = _player.CompileErrors.Any(e =>
-                    string.Equals(e.PassName, Label(pass), StringComparison.Ordinal));
-
-                string line = $"{Label(pass)}  [{pass.Type}]  {pass.Inputs.Count} 输入{(failed ? "  ✗ 编译失败" : string.Empty)}";
-
-                if (failed)
-                {
-                    ImGui.TextColored(new Vector4(1f, 0.55f, 0.45f, 1f), line);
-                }
-                else
-                {
-                    ImGui.TextUnformatted(line);
-                }
-
-                if (pass.Type == ShaderPassType.Buffer)
-                {
-                    ImGui.SameLine();
-                    ImGui.TextDisabled(_player.BufferResolution.Describe());
-                }
-
-                if (pass.Type == ShaderPassType.Cubemap)
-                {
-                    ImGui.SameLine();
-                    ImGui.TextDisabled($"{CubeTarget.FaceSize}² ×6");
-                }
-            }
-        }
-
-        ImGui.EndChild();
-
-        ImGui.TextDisabled("只读：改 project.json 后点\"重新加载\"");
-
-        ImGui.End();
     }
 
     private void DrawToast()

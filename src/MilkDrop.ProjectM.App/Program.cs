@@ -36,6 +36,19 @@ internal static class Program
     private static PresetLibrary _library = new();
     private static PresetPlaylist? _playlist;
 
+    /// <summary>ImGui 布局文件名。三个 App 各自一份，避免互相覆盖。</summary>
+    private const string ImGuiIniFileName = "imgui-projectm.ini";
+
+    /// <summary>
+    /// 设置 ImGui 布局文件的路径（null = 不读写，用于临时上下文）。
+    /// ImGui.NET 1.90 的 <c>ImGuiIOPtr.IniFilename</c> 只有 getter，只能直接写 native 结构体字段；
+    /// 字符串用 CoTaskMem 分配后故意不释放 —— ImGui 只保存指针，整个进程生命周期都要有效。
+    /// </summary>
+    private static unsafe void SetImGuiIniFileName(ImGuiIOPtr io, string? fileName)
+        => io.NativePtr->IniFilename = fileName is null
+            ? null
+            : (byte*)Marshal.StringToCoTaskMemUTF8(fileName);
+
     private static AppOptions _options = new();
     private static float _uiScale = 1f;
 
@@ -169,6 +182,9 @@ internal static class Program
                 _imguiContextCreated = true;
                 var io = ImGui.GetIO();
                 io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+
+                SetImGuiIniFileName(io, ImGuiIniFileName);
+
                 ImGui.StyleColorsDark();
                 ImGui.GetStyle().ScaleAllSizes(_uiScale);
 
@@ -998,6 +1014,10 @@ internal static class Program
         try
         {
             var io = ImGui.GetIO();
+
+            // 这里只是临时上下文，销毁时 ImGui 会自动保存布局，不能让它碰真正的 ini 文件。
+            SetImGuiIniFileName(io, null);
+
             bool loaded = LoadUiFont(io, out string? fontPath);
 
             // 触发图集构建（CPU 侧，不需要 GL 上下文）。

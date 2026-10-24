@@ -9,10 +9,10 @@
       发布：dotnet publish src\MilkDrop.Classic.App -c Release -r win-x64
       （RuntimeIdentifiers 只声明可选 RID，不写死，这样日常 dotnet build 仍然是 RID 无关的。）
     -->
-    <PublishAot>true</PublishAot>
-    <InstructionSet>avx2</InstructionSet>
     <IsAotCompatible>true</IsAotCompatible>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- 设置 ImGui 布局文件名要直接写 ImGuiIO 的 native 字段 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Vortice.Direct3D9 的 COM 调用在 AOT 下走内建 COM 互操作，不走运行时动态封送 -->
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <!-- 只用 Ordinal 比较 / InvariantCulture 解析，不需要 ICU 数据（省掉 20+ MB） -->
@@ -38,6 +38,11 @@
     -->
     <TrimmerRootAssembly Include="Silk.NET.Input.Glfw" />
   </ItemGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <PublishAot>true</PublishAot>
+    <InstructionSet>avx2</InstructionSet>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
     <!-- AOT 下不能被裁剪：GlfwWindowing.Use() 是静态引用，显式列出以防将来元包改依赖 -->

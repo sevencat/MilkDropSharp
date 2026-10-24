@@ -54,6 +54,19 @@ internal static class Program
     private static bool _reloadRequested;
     private static float _uiScaleOverride;
     private static float _uiScale = 1f;
+
+    /// <summary>ImGui 布局文件名。三个 App 各自一份，避免互相覆盖。</summary>
+    private const string ImGuiIniFileName = "imgui-shadertoy.ini";
+
+    /// <summary>
+    /// 设置 ImGui 布局文件的路径（null = 不读写，用于临时上下文）。
+    /// ImGui.NET 1.90 的 <c>ImGuiIOPtr.IniFilename</c> 只有 getter，只能直接写 native 结构体字段；
+    /// 字符串用 CoTaskMem 分配后故意不释放 —— ImGui 只保存指针，整个进程生命周期都要有效。
+    /// </summary>
+    private static unsafe void SetImGuiIniFileName(ImGuiIOPtr io, string? fileName)
+        => io.NativePtr->IniFilename = fileName is null
+            ? null
+            : (byte*)Marshal.StringToCoTaskMemUTF8(fileName);
     private static readonly Stopwatch _runStopwatch = Stopwatch.StartNew();
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -188,6 +201,10 @@ internal static class Program
         ImGui.CreateContext();
         ImGuiIOPtr io = ImGui.GetIO();
         io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+
+        // 三个 App 默认都写 imgui.ini，装在同一目录时会互相覆盖布局，各自用独立文件名。
+        SetImGuiIniFileName(io, ImGuiIniFileName);
+
         ImGui.StyleColorsDark();
 
         // 高 DPI：只放大字体与控件尺寸，不改窗口尺寸（EGL surface 在 CreateForWindow 时已定型）

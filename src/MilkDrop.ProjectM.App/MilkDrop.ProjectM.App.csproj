@@ -6,6 +6,8 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
 <!--    <PublishAot>true</PublishAot>-->
     <InstructionSet>avx2</InstructionSet>
+    <!-- 设置 ImGui 布局文件名要直接写 ImGuiIO 的 native 字段 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>milkdropsharp.ico</ApplicationIcon>
   </PropertyGroup>
 
@@ -25,6 +27,11 @@
     <EventSourceSupport>false</EventSourceSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <PublishAot>true</PublishAot>
+    <InstructionSet>avx2</InstructionSet>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(PublishAot)' == 'true'">
