@@ -25,6 +25,12 @@ public sealed class MilkdropPreset : Preset
 {
     private readonly PresetState _state = new();
 
+    /// <summary>载入/编译过程中的降级说明（着色器退回默认管线等）。</summary>
+    private readonly List<string> _loadWarnings = [];
+
+    /// <inheritdoc />
+    public override IReadOnlyList<string> LoadWarnings => _loadWarnings;
+
     /// <summary>双缓冲：每帧结束交换两个索引。</summary>
     private readonly Framebuffer _framebuffer = new(2);
 
@@ -134,8 +140,35 @@ public sealed class MilkdropPreset : Preset
             _state.MainTexture = _framebuffer.GetColorAttachmentTexture(1, 0);
         }
 
-        _perPixelMesh.CompileWarpShader(_state);
-        _finalComposite.CompileCompositeShader(_state);
+        // 着色器编译失败不再是静默降级：原因记进 LoadWarnings，交给宿主显示。
+        CollectWarning(_perPixelMesh.CompileWarpShader(_state));
+        CollectWarning(_finalComposite.CompileCompositeShader(_state));
+
+        // nWaveMode 没有对应实现时 Draw 里会静默 return，这里提前说明。
+        CollectWarning(_waveform.DescribeUnsupportedMode());
+
+        // 纹理请求都发生在上面两个 Compile 里，所以放在最后收集。
+        CollectWarning(DescribeMissingTextures(renderContext.TextureManager));
+    }
+
+    /// <summary>
+    /// 把"预设引用了但找不到的纹理"拼成一句提示。
+    /// </summary>
+    /// <remarks>
+    /// 缺纹理不会报错，会退回 1×1 占位纹理。很多 MilkDrop3 预设把外部贴图当内容源
+    /// （例如 <c>sampler_MilkDrop3_002b</c>、<c>sampler_stoy_london</c>），丢了就只剩纯色画面。
+    /// </remarks>
+    private string? DescribeMissingTextures(TextureManager? textureManager)
+    {
+        if (textureManager is null || textureManager.MissingTextures.Count == 0)
+        {
+            return null;
+        }
+
+        string names = string.Join("、", textureManager.MissingTextures);
+
+        return $"预设引用的纹理 {names} 不存在，已用 1×1 占位纹理代替，"
+             + "画面可能只有纯色——这些贴图来自 MilkDrop3 自带的 textures 目录，需要放进纹理搜索路径。";
     }
 
     /// <summary>渲染一帧（对应 <c>MilkdropPreset::RenderFrame</c>）。</summary>
@@ -383,7 +416,16 @@ public sealed class MilkdropPreset : Preset
     /// <remarks>对应 <c>MilkdropPreset::LoadShaderCode</c>。</remarks>
     private void LoadShaderCode()
     {
-        _perPixelMesh.LoadWarpShader(_state);
-        _finalComposite.LoadCompositeShader(_state);
+        CollectWarning(_perPixelMesh.LoadWarpShader(_state));
+        CollectWarning(_finalComposite.LoadCompositeShader(_state));
+    }
+
+    /// <summary>把一条降级说明写进 <see cref="LoadWarnings"/>（<c>null</c> 表示没有降级）。</summary>
+    private void CollectWarning(string? warning)
+    {
+        if (!string.IsNullOrEmpty(warning))
+        {
+            _loadWarnings.Add(warning);
+        }
     }
 }

@@ -203,7 +203,8 @@ public sealed class MilkdropShader : IDisposable
         if (!parser.ApplyPreprocessor(string.Empty, PreprocessedCode, out string sourcePreprocessed))
         {
             throw new ShaderException("Error translating HLSL " + shaderTypeString +
-                                      " shader: Preprocessing failed.\nSource:\n" + PreprocessedCode);
+                                      " shader: Preprocessing failed." + DiagnosticsSuffix(diagnostics) +
+                                      "\nSource:\n" + PreprocessedCode);
         }
 
         // 剔除预设自带的 sampler / texsize 声明，下面按引用到的纹理重新注入。
@@ -673,6 +674,7 @@ public sealed class MilkdropShader : IDisposable
         fullSource.Append(MilkdropStaticShaders.Get().GetPresetShaderHeader());
         fullSource.Append(Type == ShaderType.WarpShader ? WarpDefines : CompDefines);
         fullSource.Append(program);
+
         return fullSource.ToString();
     }
 

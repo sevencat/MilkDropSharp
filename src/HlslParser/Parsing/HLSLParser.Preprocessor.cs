@@ -139,6 +139,28 @@ public partial class HLSLParser
                 }
                 addOriginalSource = false;
             }
+            else if (_tokenizer.GetToken() == (int)HLSLToken.Identifier &&
+                     IsConditionalDirective(_tokenizer.GetIdentifier(), out bool negate))
+            {
+                // C++ 版没有 #ifdef/#ifndef：它们会作为普通标识符原样输出，随后配对的
+                // #endif 会把初始状态弹掉，导致条件栈失衡、后面整段代码被丢弃。
+                // 这里按标准语义补上（MilkDrop2077 的预设大量使用）。
+                //
+                // 注意不能靠 ReservedWords/HLSLToken 新增词条来实现：那张表必须与 C++
+                // 逐位一致（golden token 测试固定了每个 token 的数值），而 '#' 不是
+                // symbol，所以 "#ifdef" 本来就会整个落进 Identifier。
+                _tokenizer.Next();
+
+                if (_tokenizer.GetToken() != (int)HLSLToken.Identifier)
+                {
+                    _tokenizer.Error("#ifdef/#ifndef requires an identifier");
+                    return false;
+                }
+
+                bool defined = IsMacroDefined(_tokenizer.GetIdentifier());
+                isCodeActive.Push(negate ? !defined : defined);
+                addOriginalSource = false;
+            }
             else if (_tokenizer.GetToken() == (int)HLSLToken.PreprocessorElse)
             {
                 // Invert stack state.
@@ -156,6 +178,15 @@ public partial class HLSLParser
                     isCodeActive.Pop();
                 }
                 addOriginalSource = false;
+
+                if (isCodeActive.Count == 0)
+                {
+                    // 把初始状态也弹掉了 = 多出一个 #endif。最常见的原因是上面有
+                    // #ifdef/#ifndef 没有被识别（没有入栈），这样后面整段代码都会被丢
+                    // 掉。这里给出确切行号，否则调用方只能看到一句笼统的失败。
+                    _tokenizer.Error("unmatched #endif");
+                    return false;
+                }
             }
             else if (_tokenizer.GetToken() == (int)HLSLToken.PreprocessorDefine)
             {
@@ -183,8 +214,14 @@ public partial class HLSLParser
             _tokenizer.Next();
         }
 
+        if (isCodeActive.Count != 1)
+        {
+            _tokenizer.Error("unterminated conditional block (missing #endif)");
+            return false;
+        }
+
         sourcePreprocessed = result.ToString();
-        return isCodeActive.Count == 1;
+        return true;
     }
 
     internal bool ParsePreprocessorDefine()
@@ -319,6 +356,40 @@ public partial class HLSLParser
         macro.Value = _tree.AddString(value.ToString());
 
         return true;
+    }
+
+    /// <summary>当前标识符是不是 <c>#ifdef</c>/<c>#ifndef</c> 指令。</summary>
+    private static bool IsConditionalDirective(string identifier, out bool negate)
+    {
+        if (String_.Equal(identifier, "#ifdef"))
+        {
+            negate = false;
+            return true;
+        }
+
+        if (String_.Equal(identifier, "#ifndef"))
+        {
+            negate = true;
+            return true;
+        }
+
+        negate = false;
+        return false;
+    }
+
+    /// <summary>判断某个宏名是否已经 <c>#define</c> 过（给 <c>#ifdef</c>/<c>#ifndef</c> 用）。</summary>
+    private bool IsMacroDefined(string name)
+    {
+        // 与 ProcessMacroFromIdentifier 一致：后定义的优先。
+        for (int i = _macros.Count - 1; i >= 0; --i)
+        {
+            if (String_.Equal(_macros[i].Name, name))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     internal HLSLMacro ProcessMacroFromIdentifier(StringBuilder output, ref bool addOriginalSource)

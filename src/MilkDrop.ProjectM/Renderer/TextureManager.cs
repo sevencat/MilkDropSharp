@@ -34,6 +34,9 @@ public sealed class TextureManager : IDisposable
     private readonly Dictionary<string, UsageStats> _textureStats = new(StringComparer.Ordinal);
     private readonly Texture _placeholderTexture;
 
+    /// <summary>本次预设里找不到、退回占位纹理的名字（去重，按名排序）。</summary>
+    private readonly SortedSet<string> _missingTextures = new(StringComparer.Ordinal);
+
     private bool _filesScanned;
 
     /// <param name="textureSearchPaths">纹理搜索目录（按顺序查找）。</param>
@@ -49,6 +52,16 @@ public sealed class TextureManager : IDisposable
 
     /// <summary>当前预设所在目录（C++ 里是个空实现，这里只记录下来备查）。</summary>
     public string CurrentPresetPath { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// 当前预设引用了、但磁盘上找不到的纹理名（不含扩展名）。
+    /// </summary>
+    /// <remarks>
+    /// 缺纹理不会失败：<see cref="TryLoadingTexture"/> 会退回 1×1 占位纹理继续渲染，
+    /// 而着色器往往拿它当内容源，画面就变成恒定色（常见表现是全黑）。
+    /// C++ 版这里完全静默，宿主无从解释，所以额外暴露出来放进「备注」。
+    /// </remarks>
+    public IReadOnlyCollection<string> MissingTextures => _missingTextures;
 
     /// <summary>设置当前预设目录（对应 <c>SetCurrentPresetPath</c>，4.1.8 里不影响搜索路径）。</summary>
     public void SetCurrentPresetPath(string path) => CurrentPresetPath = path;
@@ -141,6 +154,7 @@ public sealed class TextureManager : IDisposable
 
         _scannedTextureFiles.Clear();
         _filesScanned = false;
+        _missingTextures.Clear();
 
         // 只淘汰年龄 ≥2 的，避免把过渡中还在用的预设纹理踢掉。
         uint newest = 99_999_999;
@@ -317,6 +331,8 @@ public sealed class TextureManager : IDisposable
                 return new TextureSamplerDescriptor(texture, _samplers[(wrapMode, filterMode)], name, unqualifiedName);
             }
         }
+
+        _missingTextures.Add(unqualifiedName);
 
         return new TextureSamplerDescriptor(_placeholderTexture, _samplers[(wrapMode, filterMode)], name, unqualifiedName);
     }

@@ -97,6 +97,15 @@ public sealed class ProjectMEngine : IDisposable
     public event Action<string, string>? PresetSwitchFailed;
 
     /// <summary>
+    /// 预设加载成功，但内部的着色器/代码被降级处理（文件名 + 降级原因）。
+    /// </summary>
+    /// <remarks>
+    /// 典型场景：预设自带的 warp/composite HLSL 转译或编译失败，退回默认管线后画面与原版不一致
+    /// （往往表现为"能播但一片黑"）。C++ 版的这些信息只进日志，这里额外抛给宿主显示。
+    /// </remarks>
+    public event Action<string, string>? PresetLoadDegraded;
+
+    /// <summary>
     /// 当前预设的显示名。
     /// </summary>
     /// <remarks>
@@ -134,6 +143,7 @@ public sealed class ProjectMEngine : IDisposable
             }
 
             StartPresetTransition(preset, !smoothTransition);
+            ReportDegradedLoad(preset, presetFilename);
         }
         catch (Exception ex)
         {
@@ -401,6 +411,17 @@ public sealed class ProjectMEngine : IDisposable
         _transition = null;
         _transitioningPreset = null;
         _activePreset = null;
+    }
+
+    /// <summary>把预设自己攒下的降级说明合并成一条事件抛给宿主。</summary>
+    private void ReportDegradedLoad(Preset? preset, string source)
+    {
+        if (preset is null || preset.LoadWarnings.Count == 0)
+        {
+            return;
+        }
+
+        PresetLoadDegraded?.Invoke(source, string.Join("；", preset.LoadWarnings));
     }
 
     private void StartPresetTransition(Preset? preset, bool hardCut)

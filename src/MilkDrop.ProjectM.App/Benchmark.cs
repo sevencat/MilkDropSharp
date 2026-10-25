@@ -17,6 +17,7 @@ internal sealed record BenchmarkEntry(
     double MeanLuminance,
     double NonBlackRatio,
     string? Error,
+    string? Warning,
     string? Screenshot);
 
 /// <summary>
@@ -62,7 +63,12 @@ internal static class Benchmark
             string? loadError = null;
             void OnFailed(string file, string message) => loadError = message;
 
+            string? loadWarning = null;
+            void OnDegraded(string file, string message)
+                => loadWarning = loadWarning is null ? message : loadWarning + "；" + message;
+
             engine.PresetSwitchFailed += OnFailed;
+            engine.PresetLoadDegraded += OnDegraded;
 
             var stopwatch = Stopwatch.StartNew();
             engine.LoadPresetFile(presetPath, smoothTransition: false);
@@ -89,6 +95,7 @@ internal static class Benchmark
             }
 
             engine.PresetSwitchFailed -= OnFailed;
+            engine.PresetLoadDegraded -= OnDegraded;
 
             string? screenshot = null;
             double meanLuminance = 0;
@@ -114,6 +121,7 @@ internal static class Benchmark
                 meanLuminance,
                 nonBlackRatio,
                 loadError,
+                loadWarning,
                 screenshot);
 
             entries.Add(entry);
@@ -121,6 +129,10 @@ internal static class Benchmark
             if (loadError is not null)
             {
                 Console.WriteLine($"[{index + 1}/{presets.Count}] 加载失败 {Path.GetFileName(presetPath)}: {loadError}");
+            }
+            else if (loadWarning is not null)
+            {
+                Console.WriteLine($"[{index + 1}/{presets.Count}] 加载降级 {Path.GetFileName(presetPath)}: {loadWarning}");
             }
             else if (glError != 0)
             {
@@ -145,12 +157,13 @@ internal static class Benchmark
 
         int failed = entries.Count(entry => !entry.Loaded);
         int withGlError = entries.Count(entry => entry.GlError != 0);
+        int degraded = entries.Count(entry => entry.Warning is not null);
         int ok = entries.Count(entry => entry.Loaded && entry.GlError == 0);
         int blank = entries.Count(entry => entry.Loaded && entry.GlError == 0 && entry.NonBlackRatio < 0.01);
 
         Console.WriteLine();
         Console.WriteLine("---- bench 汇总 ----");
-        Console.WriteLine($"预设数: {entries.Count}    通过: {ok}    加载失败: {failed}    GL error: {withGlError}    全黑: {blank}");
+        Console.WriteLine($"预设数: {entries.Count}    通过: {ok}    加载失败: {failed}    GL error: {withGlError}    加载降级: {degraded}    全黑: {blank}");
         Console.WriteLine($"总耗时: {total.Elapsed.TotalSeconds:0.0}s    单预设平均: {entries.Average(e => e.TotalMilliseconds):0.0}ms");
 
         foreach (BenchmarkEntry slow in entries.OrderByDescending(e => e.TotalMilliseconds).Take(3))
@@ -218,7 +231,7 @@ internal static class Benchmark
     private static void WriteReport(string reportPath, List<BenchmarkEntry> entries)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("index,file,loaded,frames,gl_error,load_ms,mean_luminance,non_black_ratio,error,screenshot");
+        builder.AppendLine("index,file,loaded,frames,gl_error,load_ms,mean_luminance,non_black_ratio,error,warning,screenshot");
 
         for (var i = 0; i < entries.Count; i++)
         {
@@ -232,6 +245,7 @@ internal static class Benchmark
             builder.Append(entry.MeanLuminance.ToString("0.#####", CultureInfo.InvariantCulture)).Append(',');
             builder.Append(entry.NonBlackRatio.ToString("0.#####", CultureInfo.InvariantCulture)).Append(',');
             builder.Append(Escape(entry.Error ?? string.Empty)).Append(',');
+            builder.Append(Escape(entry.Warning ?? string.Empty)).Append(',');
             builder.Append(Escape(entry.Screenshot ?? string.Empty));
             builder.AppendLine();
         }

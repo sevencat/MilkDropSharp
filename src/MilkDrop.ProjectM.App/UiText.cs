@@ -75,6 +75,18 @@ internal static class UiText
     /// <summary>预设时长的随机抖动。</summary>
     public const string RandomDuration = "时长随机抖动";
 
+    /// <summary>备注分组标题。</summary>
+    public const string NoteSection = "备注";
+
+    /// <summary>没有异常时的备注正文。</summary>
+    public const string NoteHealthy = "加载正常，无降级。";
+
+    /// <summary>备注：预设整体加载失败（参数：文件名、原因）。</summary>
+    public const string NoteLoadFailedFormat = "加载失败「{0}」：{1}";
+
+    /// <summary>备注：预设加载成功但内部做了降级（参数：原因）。</summary>
+    public const string NoteLoadDegradedFormat = "加载成功但画面可能不完整：{0}";
+
     /// <summary>预设列表标题。</summary>
     public const string PresetList = "预设列表";
 

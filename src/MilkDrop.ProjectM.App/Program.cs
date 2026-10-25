@@ -68,6 +68,12 @@ internal static class Program
     private static string? _lastError;
     private static string? _lastScreenshot;
 
+    /// <summary>备注正文（最新一次加载的结果/失败原因）；<c>null</c> = 正常。</summary>
+    private static string? _loadNote;
+
+    /// <summary>备注是否为致命错误（红色）而非降级警告（黄色）。</summary>
+    private static bool _loadNoteIsError;
+
     private static string _searchText = string.Empty;
 
     /// <summary>100% DPI 下的字号（ImGui 默认 13px 偏小）。</summary>
@@ -248,8 +254,13 @@ internal static class Program
         _engine.PresetSwitchFailed += (file, message) =>
         {
             _lastError = $"{Path.GetFileName(file)}: {message}";
+            SetLoadNote(string.Format(UiText.NoteLoadFailedFormat, Path.GetFileName(file), message), isError: true);
             Console.Error.WriteLine($"预设加载失败 {file}: {message}");
         };
+
+        // 加载没抛异常，但预设内部的着色器/表达式被降级了（画面往往不完整或全黑）。
+        _engine.PresetLoadDegraded += (file, message) =>
+            SetLoadNote(string.Format(UiText.NoteLoadDegradedFormat, message), isError: false);
 
         BuildLibrary(options);
 
@@ -301,7 +312,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(options.PresetFile))
         {
             _library.AddFile(options.PresetFile);
-            _engine.LoadPresetFile(options.PresetFile, smoothTransition: false);
+            LoadPreset(options.PresetFile, smooth: false);
         }
         else if (_library.All.Count > 0)
         {
@@ -676,7 +687,32 @@ internal static class Program
         }
 
         string path = _library.All[(int)index];
+        LoadPreset(path, smooth);
+    }
+
+    /// <summary>
+    /// 加载一个预设，并先把备注清空。
+    /// </summary>
+    /// <remarks>
+    /// 加载成功且无降级时备注就停在"正常"；失败/降级时由 <c>PresetSwitchFailed</c> /
+    /// <c>PresetLoadDegraded</c> 写回原因，从而保证备注始终是"最近一次加载"的结果。
+    /// </remarks>
+    private static void LoadPreset(string path, bool smooth)
+    {
+        if (_engine is null)
+        {
+            return;
+        }
+
+        SetLoadNote(null, isError: false);
         _engine.LoadPresetFile(path, smooth);
+    }
+
+    /// <summary>写备注；<c>null</c> 表示恢复正常。</summary>
+    private static void SetLoadNote(string? text, bool isError)
+    {
+        _loadNote = text;
+        _loadNoteIsError = isError;
     }
 
     private static void SaveScreenshot(string fileName)
@@ -701,8 +737,44 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            _lastError = "截图失败: " + ex.Message;
+            _lastError = UiText.ErrorPrefix + "截图失败: " + ex.Message;
+            SetLoadNote(_lastError, isError: true);
             Console.Error.WriteLine(_lastError);
+        }
+    }
+
+    /// <summary>
+    /// 「备注」区：显示最近一次预设加载的结果，失败/降级时给出原因。
+    /// </summary>
+    /// <remarks>
+    /// 用 <c>AutoResizeY</c> 的子窗口承载：着色器报错动辄几百字符，包裹换行后高度不定，
+    /// 固定高度会被截掉一行。
+    /// </remarks>
+    private static void DrawLoadNote()
+    {
+        ImGui.Text(UiText.NoteSection);
+
+        if (ImGui.BeginChild("load-note", new Vector2(-1, 0),
+                             ImGuiChildFlags.Border | ImGuiChildFlags.AutoResizeY))
+        {
+            if (string.IsNullOrEmpty(_loadNote))
+            {
+                ImGui.TextColored(new Vector4(0.6f, 1f, 0.7f, 1f), UiText.NoteHealthy);
+            }
+            else
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text,
+                    _loadNoteIsError ? new Vector4(1f, 0.4f, 0.4f, 1f) : new Vector4(1f, 0.85f, 0.3f, 1f));
+                ImGui.TextWrapped(_loadNote);
+                ImGui.PopStyleColor();
+
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip(_loadNote);
+                }
+            }
+
+            ImGui.EndChild();
         }
     }
 
@@ -728,6 +800,8 @@ internal static class Program
             ImGui.Text(string.Format(UiText.CurrentPresetFormat, presetName));
             ImGui.ProgressBar((float)_engine.PresetProgress, new Vector2(-1, 0),
                 string.Format(UiText.ProgressFormat, _engine.PresetProgress * 100));
+
+            DrawLoadNote();
 
             ImGui.Separator();
             ImGui.Text(UiText.PlaybackSection);
@@ -840,7 +914,7 @@ internal static class Program
 
                     if (ImGui.Selectable(Path.GetFileName(path)))
                     {
-                        _engine.LoadPresetFile(path, smoothTransition: true);
+                        LoadPreset(path, smooth: true);
                     }
 
                     if (ImGui.IsItemHovered())
@@ -869,11 +943,6 @@ internal static class Program
             if (_lastScreenshot is not null)
             {
                 ImGui.Text(string.Format(UiText.ScreenshotSavedFormat, _lastScreenshot));
-            }
-
-            if (_lastError is not null)
-            {
-                ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), UiText.ErrorPrefix + _lastError);
             }
         }
 

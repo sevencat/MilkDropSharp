@@ -113,13 +113,14 @@ public sealed class PerPixelMesh : RenderItem
     /// <summary>
     /// 载入预设自带的 warp shader（对应 <c>LoadWarpShader</c>）。代码加载失败时退回默认管线。
     /// </summary>
-    public void LoadWarpShader(PresetState presetState)
+    /// <returns>失败原因；<c>null</c> 表示没有降级（不需要 warp shader / 载入成功）。</returns>
+    public string? LoadWarpShader(PresetState presetState)
     {
         ArgumentNullException.ThrowIfNull(presetState);
 
         if (presetState.WarpShaderVersion <= 0 || presetState.WarpShader.Length == 0)
         {
-            return;
+            return null;
         }
 
         var warpShader = new MilkdropShader(ShaderType.WarpShader);
@@ -129,34 +130,41 @@ public sealed class PerPixelMesh : RenderItem
             warpShader.LoadCode(presetState.WarpShader);
             _warpShader?.Dispose();
             _warpShader = warpShader;
+            return null;
         }
-        catch (ShaderException)
+        catch (ShaderException ex)
         {
+            string reason = ShaderFailureReason.Warp(ex);
             warpShader.Dispose();
             _warpShader = null;
+            return "warp 着色器载入失败，已退回默认 warp 管线：" + reason;
         }
     }
 
     /// <summary>
     /// 编译已载入的 warp shader（对应 <c>CompileWarpShader</c>）。失败时退回默认管线。
     /// </summary>
-    public void CompileWarpShader(PresetState presetState)
+    /// <returns>失败原因；<c>null</c> 表示没有降级（不需要 warp shader / 编译成功）。</returns>
+    public string? CompileWarpShader(PresetState presetState)
     {
         ArgumentNullException.ThrowIfNull(presetState);
 
         if (_warpShader is null)
         {
-            return;
+            return null;
         }
 
         try
         {
             _warpShader.LoadTexturesAndCompile(presetState);
+            return null;
         }
-        catch (ShaderException)
+        catch (ShaderException ex)
         {
+            string reason = ShaderFailureReason.Warp(ex);
             _warpShader.Dispose();
             _warpShader = null;
+            return "warp 着色器编译失败，已退回默认 warp 管线：" + reason;
         }
     }
 

@@ -93,9 +93,12 @@ public sealed class FinalComposite : RenderItem
     /// 载入 composite shader（对应 <c>FinalComposite::LoadCompositeShader</c>）。
     /// 预设没有 comp shader 时创建 VideoEcho（以及需要的 Filters）。
     /// </summary>
-    public void LoadCompositeShader(PresetState presetState)
+    /// <returns>失败原因；<c>null</c> 表示没有降级。</returns>
+    public string? LoadCompositeShader(PresetState presetState)
     {
         ArgumentNullException.ThrowIfNull(presetState);
+
+        string? lastFailure = null;
 
         if (presetState.CompositeShaderVersion > 0)
         {
@@ -108,12 +111,14 @@ public sealed class FinalComposite : RenderItem
                     : DefaultCompositeShader;
                 compositeShader.LoadCode(code);
             }
-            catch (ShaderException)
+            catch (ShaderException ex)
             {
                 // 退回默认着色器（与 C++ 一致）。
                 compositeShader.Dispose();
                 compositeShader = new MilkdropShader(ShaderType.CompositeShader);
                 compositeShader.LoadCode(DefaultCompositeShader);
+                lastFailure = "composite 着色器载入失败，已退回默认 composite 着色器："
+                              + ShaderFailureReason.Composite(ex);
             }
 
             _compositeShader?.Dispose();
@@ -129,31 +134,37 @@ public sealed class FinalComposite : RenderItem
                 _filters = new Filters(presetState);
             }
         }
+
+        return lastFailure;
     }
 
     /// <summary>
     /// 取纹理并编译 composite shader（对应 <c>FinalComposite::CompileCompositeShader</c>）。
     /// </summary>
-    public void CompileCompositeShader(PresetState presetState)
+    /// <returns>失败原因；<c>null</c> 表示没有降级。</returns>
+    public string? CompileCompositeShader(PresetState presetState)
     {
         ArgumentNullException.ThrowIfNull(presetState);
 
         if (_compositeShader is null)
         {
-            return;
+            return null;
         }
 
         try
         {
             _compositeShader.LoadTexturesAndCompile(presetState);
+            return null;
         }
-        catch (ShaderException)
+        catch (ShaderException ex)
         {
             // 退回默认着色器。
+            string reason = ShaderFailureReason.Composite(ex);
             _compositeShader.Dispose();
             _compositeShader = new MilkdropShader(ShaderType.CompositeShader);
             _compositeShader.LoadCode(DefaultCompositeShader);
             _compositeShader.LoadTexturesAndCompile(presetState);
+            return "composite 着色器编译失败，已退回默认 composite 着色器：" + reason;
         }
     }
 

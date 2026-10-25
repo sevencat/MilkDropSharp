@@ -42,6 +42,27 @@ public sealed class Waveform : RenderItem
         gl.BufferData<Point>(GLEnum.ArrayBuffer, vertexData, GLEnum.StreamDraw);
     }
 
+    /// <summary>
+    /// 判断当前 <c>nWaveMode</c> 有没有对应实现：没有时返回一句说明，正常返回 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Draw"/> 遇到没有实现的模式会直接 <c>return</c>（什么都不画，也不报错），
+    /// 宿主很难解释"为什么看不到波形"。这里在加载阶段就把原因算出来，交给
+    /// <see cref="Preset.LoadWarnings"/> 显示。
+    /// </remarks>
+    public string? DescribeUnsupportedMode()
+    {
+        WaveformMode mode = (WaveformMode)(_presetState.WaveMode % (int)WaveformMode.Count);
+
+        if (Factory.IsSupported(mode))
+        {
+            return null;
+        }
+
+        return $"nWaveMode={_presetState.WaveMode}（支持范围 0..{(int)WaveformMode.Count - 1}）"
+             + " 没有对应的波形实现，主波形不会绘制。";
+    }
+
     /// <summary>画主波形（对应 <c>Waveform::Draw</c>）。</summary>
     public unsafe void Draw(PerFrameContext presetPerFrameContext)
     {

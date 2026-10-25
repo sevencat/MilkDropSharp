@@ -12,6 +12,15 @@ public abstract class Preset : IPreset, IDisposable
     /// <summary>预设文件名（从 URL/文件加载时由工厂写入，流加载时为空）。</summary>
     public string FileName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 加载/初始化过程中的非致命降级说明（例如着色器编译失败退回默认管线）。
+    /// </summary>
+    /// <remarks>
+    /// 这些不影响继续渲染，但画面通常和原版不一致，宿主应该把它显示给用户。
+    /// 致命错误走异常，不在这里。
+    /// </remarks>
+    public virtual IReadOnlyList<string> LoadWarnings => [];
+
     /// <summary>申请额外的预设资源，必须在第一帧之前调用一次。</summary>
     public abstract void Initialize(RenderContext renderContext);
 
