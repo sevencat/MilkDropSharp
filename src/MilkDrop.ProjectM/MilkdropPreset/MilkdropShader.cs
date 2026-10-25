@@ -60,6 +60,27 @@ public sealed class MilkdropShader : IDisposable
     /// <summary>C++ <c>std::regex("float4\\s+texsize_.*")</c>。</summary>
     private static readonly Regex TexSizeDeclarationRegex = new("float4\\s+texsize_[^\\n]*");
 
+    /// <summary>是否调用了 <c>tanh</c>（GLSL ES 1.0 没有这个内建）。</summary>
+    private static readonly Regex TanhCall = new("\\btanh\\s*\\(", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// <c>tanh</c> 支持：把调用重定向到一个自定义函数，并按需插在预设代码前面。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// HlslParser 的内建函数表里没有 <c>tanh</c>（它照着上游 C++ 的表生成，不能手改），
+    /// 所以预设里一用就报 "Undeclared identifier 'tanh'"。
+    /// </para>
+    /// <para>
+    /// GLSL 3.30 自带 <c>tanh</c>，但直接生成 <c>float tanh(float)</c> 会被 ANGLE 拒绝
+    /// （"Name of a built-in function cannot be redeclared"），因此用宏把名字换掉。
+    /// 参数较大时 <c>exp</c> 溢出成 inf，(inf-1)/(inf+1) 仍然是 1，饱和行为正确。
+    /// </para>
+    /// </remarks>
+    private const string TanhSupport =
+        "#define tanh _md_tanh\n"
+        + "float _md_tanh(float x) { float e = exp(2.0 * x); return (e - 1.0) / (e + 1.0); }\n";
+
     private static readonly char[] SamplerNameStopChars = [' ', ';', ',', '\n', '\r', ')'];
     private static readonly char[] TexSizeNameStopChars = [' ', ';', ',', '.', '\n', '\r', ')'];
 
@@ -401,6 +422,9 @@ public sealed class MilkdropShader : IDisposable
         shader.SetUniformFloat4("rand_frame", new Vector4(FloatRand(), FloatRand(), FloatRand(), FloatRand()));
         shader.SetUniformFloat4("rand_preset", new Vector4(_randValues[0], _randValues[1], _randValues[2], _randValues[3]));
 
+        // 兼容层：`#define mouse _mouse`（MilkDrop3 预设用，原版 projectM 没有这个 uniform）。
+        shader.SetUniformFloat4("_mouse", renderContext.Mouse);
+
         shader.SetUniformFloat4("_c0", new Vector4(renderContext.AspectX, renderContext.AspectY,
                                                   1.0f / renderContext.AspectX, 1.0f / renderContext.AspectY));
         shader.SetUniformFloat4("_c1", Vector4.Zero);
@@ -583,6 +607,18 @@ public sealed class MilkdropShader : IDisposable
 
         // sampler_state 覆盖块 GLSL 不支持，先整块删掉。
         program = RemoveSamplerStateBlocks(program);
+
+        // 公共头里 aspect/time/q1.. 都是对象式宏，预设若拿它们当局部变量名会被替换成
+        // "float(_c0) = ..." 之类的非法代码。这里把冲突的声明改名。
+        program = MacroShadowingFixer.Apply(
+            program,
+            MacroShadowingFixer.CollectObjectMacroNames(
+                MilkdropStaticShaders.Get().GetPresetShaderHeader()));
+
+        if (TanhCall.IsMatch(program))
+        {
+            program = TanhSupport + program;
+        }
 
         // 用去注释副本定位，避免匹配到注释里的 shader_body。
         string stripped = Utils.StripComments(program);

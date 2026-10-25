@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace MilkDrop.ProjectM.Renderer;
 
 /// <summary>每帧变化的全局渲染参数。</summary>
@@ -43,6 +45,16 @@ public sealed class RenderContext
     public TextureManager? TextureManager { get; set; }
 
     /// <summary>
+    /// 鼠标位置，供预设 shader 的兼容层 <c>mouse</c>（<c>_mouse</c> uniform）使用。
+    /// </summary>
+    /// <remarks>
+    /// xy 是归一化到 <c>-1..1</c> 的光标坐标（与 <c>MilkDrop.Classic</c> 的
+    /// <c>PerFrameContext.Mouse</c> 一致），zw 暂未使用。原版 projectM 没有这个变量，
+    /// 只有 MilkDrop3 的预设会用。
+    /// </remarks>
+    public Vector4 Mouse { get; set; }
+
+    /// <summary>
     /// 把另一份渲染上下文拷进本实例（对应 C++ 的值赋值 <c>m_state.renderContext = renderContext</c>，
     /// 因为预设持有自己的 <see cref="RenderContext"/> 副本）。
     /// </summary>
@@ -68,5 +80,6 @@ public sealed class RenderContext
         PerPixelMeshX = other.PerPixelMeshX;
         PerPixelMeshY = other.PerPixelMeshY;
         TextureManager = other.TextureManager;
+        Mouse = other.Mouse;
     }
 }

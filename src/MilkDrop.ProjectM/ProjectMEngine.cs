@@ -1,4 +1,5 @@
-﻿using MilkDrop.ProjectM.Audio;
+﻿using System.Numerics;
+using MilkDrop.ProjectM.Audio;
 using MilkDrop.ProjectM.Renderer;
 using MilkDrop.Rendering.Gles3;
 using Silk.NET.OpenGLES;
@@ -42,6 +43,9 @@ public sealed class ProjectMEngine : IDisposable
 
     private int _windowWidth;
     private int _windowHeight;
+
+    /// <summary>光标位置，归一化到 -1..1（y 轴向上）；默认 (0,0) = 屏幕中心。</summary>
+    private Vector4 _mouse;
 
     private double _presetDuration = 30.0;
     private double _softCutDuration = 3.0;
@@ -189,6 +193,56 @@ public sealed class ProjectMEngine : IDisposable
     /// <summary>按当前路径重建纹理管理器。</summary>
     public void ResetTextures() => RecreateTextureManager();
 
+    /// <summary>
+    /// 设置鼠标位置，供预设 shader 的兼容层 <c>mouse</c> 使用。
+    /// </summary>
+    /// <param name="normalizedX">窗口坐标 0..1（左→右）。</param>
+    /// <param name="normalizedY">窗口坐标 0..1（上→下）。</param>
+    /// <remarks>内部换算成 <c>-1..1</c>（y 轴向上），与原版 MilkDrop / Classic 分支一致。</remarks>
+    public void SetMousePosition(float normalizedX, float normalizedY)
+    {
+        _mouse = new Vector4(normalizedX * 2.0f - 1.0f, 1.0f - normalizedY * 2.0f, 0.0f, 0.0f);
+    }
+
+    /// <summary>频谱纹理的自动增益峰值（每帧缓慢衰减）。</summary>
+    private float _fftPeak = 1.0f;
+
+    /// <summary>频谱纹理的像素缓冲（RGBA）。</summary>
+    private readonly byte[] _fftPixels = new byte[AudioConstants.SpectrumSamples * 4];
+
+    /// <summary>
+    /// 把当前帧的频谱写进 <c>sampler_fft</c>（512×1）。
+    /// </summary>
+    /// <remarks>
+    /// <c>SpectrumLeft</c> 是未归一化的 FFT 幅度，直接映射会"静音全黑、大声全白"。
+    /// 这里用"峰值缓慢衰减"做自动增益（每帧 ×0.98），压到 0..1 —— 与 Classic 分支同一套近似。
+    /// </remarks>
+    private void UpdateFftTexture(FrameAudioData audioData)
+    {
+        float peak = 0.0f;
+        for (var i = 0; i < AudioConstants.SpectrumSamples; i++)
+        {
+            peak = Math.Max(peak, audioData.SpectrumLeft[i]);
+        }
+
+        _fftPeak = Math.Max(peak, _fftPeak * 0.98f);
+
+        float scale = _fftPeak > 1e-5f ? 1.0f / _fftPeak : 0.0f;
+
+        for (var i = 0; i < AudioConstants.SpectrumSamples; i++)
+        {
+            byte value = (byte)Math.Clamp(audioData.SpectrumLeft[i] * scale * 255.0f, 0.0f, 255.0f);
+
+            int offset = i * 4;
+            _fftPixels[offset + 0] = value;
+            _fftPixels[offset + 1] = value;
+            _fftPixels[offset + 2] = value;
+            _fftPixels[offset + 3] = 255;
+        }
+
+        _textureManager.UpdateFftTexture(_fftPixels);
+    }
+
     /// <summary>渲染一帧。</summary>
     public void RenderFrame()
     {
@@ -202,6 +256,8 @@ public sealed class ProjectMEngine : IDisposable
 
         _audioStorage.UpdateFrameAudioData(_timeKeeper.SecondsSinceLastFrame, (uint)_frameCount);
         FrameAudioData audioData = _audioStorage.GetFrameAudioData();
+
+        UpdateFftTexture(audioData);
 
         // 预设到期 / 硬切判定（每帧只通知一次）。
         if (!_presetChangeNotified)
@@ -491,6 +547,7 @@ public sealed class ProjectMEngine : IDisposable
             PerPixelMeshX = (int)_meshX,
             PerPixelMeshY = (int)_meshY,
             TextureManager = _textureManager,
+            Mouse = _mouse,
         };
     }
 

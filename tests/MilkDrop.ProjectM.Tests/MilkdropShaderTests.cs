@@ -69,6 +69,43 @@ public sealed class MilkdropShaderTextTests
     }
 
     [Fact]
+    public void LoadCode_InjectsMouseBuiltin()
+    {
+        var shader = new MilkdropShader(ShaderType.CompositeShader);
+        shader.LoadCode("""
+            shader_body
+            {
+                ret = float3(mouse.xy, 0);
+            }
+            """);
+
+        string code = shader.PreprocessedCode;
+
+        // MilkDrop3 的 mouse 内建（原版 projectM 没有）：uniform + 宏。
+        Assert.Contains("uniform float4   _mouse;", code, StringComparison.Ordinal);
+        Assert.Contains("#define mouse    _mouse", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MouseBuiltin_TranspilesToFloat4Uniform()
+    {
+        var shader = new MilkdropShader(ShaderType.CompositeShader);
+        shader.LoadCode("""
+            shader_body
+            {
+                ret = mouse.xyz;
+            }
+            """);
+
+        // 不需要采样器，转译本身不碰 GL。
+        string glsl = shader.TranspileHLSLShader([], [], []);
+
+        Assert.Contains("uniform vec4 _mouse;", glsl, StringComparison.Ordinal);
+        // 宏已展开，GLSL 里不该再出现 mouse 这个名字。
+        Assert.DoesNotContain("mouse.", glsl, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LoadCode_TruncatesTextAfterShaderFunction()
     {
         var shader = new MilkdropShader(ShaderType.CompositeShader);

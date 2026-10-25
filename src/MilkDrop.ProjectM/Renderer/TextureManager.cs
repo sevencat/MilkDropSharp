@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using MilkDrop.ProjectM.Audio;
 using MilkDrop.Rendering.Gles3;
 using Silk.NET.OpenGLES;
 using Sampler = MilkDrop.Rendering.Gles3.Sampler;
@@ -24,6 +25,9 @@ namespace MilkDrop.ProjectM.Renderer;
 public sealed class TextureManager : IDisposable
 {
     private const string IdleTextureResourcePrefix = "MilkDrop.ProjectM.IdleTextures.";
+
+    /// <summary>频谱纹理的名字（预设里写 <c>sampler_fft</c>）。</summary>
+    private const string FftTextureName = "fft";
 
     private static readonly string[] Extensions = [".jpg", ".jpeg", ".dds", ".png", ".tga", ".bmp", ".dib"];
 
@@ -62,6 +66,21 @@ public sealed class TextureManager : IDisposable
     /// C++ 版这里完全静默，宿主无从解释，所以额外暴露出来放进「备注」。
     /// </remarks>
     public IReadOnlyCollection<string> MissingTextures => _missingTextures;
+
+    /// <summary>
+    /// 用 RGBA 像素刷新频谱纹理（<c>sampler_fft</c>，512×1）。
+    /// </summary>
+    /// <param name="rgbaPixels">长度必须是 <c>512 * 4</c>。</param>
+    /// <remarks>纹理不存在时无操作，方便在没建纹理的单元测试里调用。</remarks>
+    public void UpdateFftTexture(byte[] rgbaPixels)
+    {
+        ArgumentNullException.ThrowIfNull(rgbaPixels);
+
+        if (_textures.TryGetValue(FftTextureName, out Texture? texture))
+        {
+            texture.SetPixels(rgbaPixels);
+        }
+    }
 
     /// <summary>设置当前预设目录（对应 <c>SetCurrentPresetPath</c>，4.1.8 里不影响搜索路径）。</summary>
     public void SetCurrentPresetPath(string path) => CurrentPresetPath = path;
@@ -295,6 +314,11 @@ public sealed class TextureManager : IDisposable
         // idle 纹理（原 C++ 由 SOIL 从内存里的 32 位 TGA 解码）。
         _textures["idlem"] = LoadEmbeddedTexture("idlem", "idlem.tga");
         _textures["idleheadphones"] = LoadEmbeddedTexture("idleheadphones", "idleheadphones.tga");
+
+        // 兼容层：512×1 的频谱纹理（MilkDrop3 的 get_fft/get_fft_hz 采样它）。
+        // 原版 projectM 没有这张纹理，用到的预设会直接编译失败。
+        _textures[FftTextureName] = new Texture(FftTextureName, AudioConstants.SpectrumSamples, 1,
+                                                isUserTexture: false);
 
         // 噪声纹理。
         _textures["noise_lq_lite"] = MilkdropNoise.LowQualityLite();

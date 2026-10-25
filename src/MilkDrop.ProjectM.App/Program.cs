@@ -484,6 +484,7 @@ internal static class Program
             if (_engine is not null)
             {
                 _engine.SetWindowSize(width, height);
+                UpdateEngineMouse(width, height);
                 _engine.RenderFrame();
             }
             else
@@ -562,6 +563,32 @@ internal static class Program
         int height = framebuffer.Y > 0 ? framebuffer.Y : window.Size.Y;
 
         return (Math.Max(1, width), Math.Max(1, height));
+    }
+
+    /// <summary>
+    /// 把光标位置换算成窗口 0..1 交给引擎（预设兼容层的 <c>mouse</c> 内建）。
+    /// </summary>
+    /// <remarks>
+    /// 用 drawing buffer 尺寸归一化：Silk 的光标坐标与 <c>ImguiInput</c> 用的是同一个坐标系
+    /// （高 DPI 下与 <c>window.Size</c> 不同），而 <c>SetMousePosition</c> 只关心比例。
+    /// </remarks>
+    private static void UpdateEngineMouse(int width, int height)
+    {
+        if (_engine is null || _inputContext is null || _inputContext.Mice.Count == 0)
+        {
+            return;
+        }
+
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        Vector2 position = _inputContext.Mice[0].Position;
+
+        _engine.SetMousePosition(
+            Math.Clamp(position.X / width, 0f, 1f),
+            Math.Clamp(position.Y / height, 0f, 1f));
     }
 
     private static void OnHotkey(HotkeyCommand command)

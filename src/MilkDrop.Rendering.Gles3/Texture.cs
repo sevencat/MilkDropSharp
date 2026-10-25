@@ -101,6 +101,28 @@ public sealed class Texture : IDisposable
         gl.BindTexture(_target, 0);
     }
 
+    /// <summary>
+    /// 用新像素覆盖整张纹理（每帧变化的动态纹理，如频谱 <c>sampler_fft</c>）。
+    /// </summary>
+    /// <param name="pixels">RGBA 顺序的像素，长度必须是 <c>Width * Height * 4</c>。</param>
+    public unsafe void SetPixels(ReadOnlySpan<byte> pixels)
+    {
+        if (_textureId == 0)
+        {
+            return;
+        }
+
+        var gl = GlContext.Gl;
+        gl.BindTexture(_target, _textureId);
+
+        fixed (byte* data = pixels)
+        {
+            gl.TexSubImage2D(_target, 0, 0, 0, (uint)_width, (uint)_height, _format, _type, data);
+        }
+
+        gl.BindTexture(_target, 0);
+    }
+
     public void Dispose()
     {
         if (_textureId == 0)

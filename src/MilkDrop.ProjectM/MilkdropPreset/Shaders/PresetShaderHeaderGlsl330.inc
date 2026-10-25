@@ -26,6 +26,9 @@ uniform float4   _c12;          // .xyz = mip info for main image
                                 // .w = unused
 uniform float4   _c13;          // .xy = blur2_min, blur2_max
                                 // .zw = blur3_min, blur3_max
+// Extension: MilkDrop3's `mouse` built-in (upstream projectM has no such uniform).
+// .xy = cursor in -1..1 (y up), .zw unused.
+uniform float4   _mouse;
 uniform float4   _qa;           // q vars bank 1 [q1-q4]
 uniform float4   _qb;           // q vars bank 2 [q5-q8]
 uniform float4   _qc;           // q vars ...
@@ -86,6 +89,8 @@ uniform float4x3 rot_rand4;
 #define fps      _c2.y
 #define frame    _c2.z
 #define progress _c2.w
+// Extension: cursor position, matches MilkDrop.Classic's shader compat layer.
+#define mouse    _mouse
 #define bass _c3.x
 #define mid  _c3.y
 #define treb _c3.z
