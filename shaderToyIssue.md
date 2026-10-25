@@ -748,6 +748,55 @@ UI 在 `App/Ui/LibraryPanel.cs`（含 `App/FileDialog.cs`），命令行在 `Pro
   只把 JSON 改成 `textures/xxx.png` 并从 `meta.json` 的 `missingResources` 里移除。
   **实测**：手工放好 `textures/<hash>.png` 后跑 `--fetch-missing`，输出"成功 1 个"，JSON 已改写、缺失列表清空。
 - **代理**：`--proxy socks5://127.0.0.1:1080`（也接受裸 `host:port`、`none` 直连）；
-  优先级 命令行 &gt; `MILKDROP_PROXY` &gt; `%APPDATA%\MilkDropShaderToy\settings.json` &gt; 默认 `socks5://127.0.0.1:1080`；
+  优先级 命令行 &gt; `MILKDROP_PROXY` &gt; 设置文件 &gt; 默认 `socks5://127.0.0.1:1080`；
   界面左侧"代理"一栏可改并持久化。**实测**：故意把端口写错会立刻报"积极拒绝"，说明请求确实走代理。
   但即便经代理，站点仍对 curl/.NET 这类客户端返回 403（S8-8，需要登录/浏览器指纹），所以自动下载暂时搁置。
+
+### S8-12 数据源整体改为 `shadertoy.db`（已实现，按需求调整）
+
+- **需求**：不再读 `shaders/` 目录；工程与 pass 代码都从 `shadertoy.db` 拿，**只有图片**从 `media/` 拿。
+- **实现**：`Import/SqliteDatabase.cs`（P/Invoke 系统自带 `winsqlite3.dll`，只读、无 NuGet、AOT 友好）+
+  `Import/ShaderDatabase.cs`（读 `shaders` / `renderpasses` / `shader_inputs` / `shader_outputs`）；
+  `ShaderLibrary.Scan(数据根)` 只查列表需要的几列，`Player.LoadDatabase(db, id)` 才取完整工程，
+  `Player.Reload()` 按来源（库/文件/演示）分别重读。
+- **工程来源**：优先 `shaders.RawJson`（原样上游文本）；pass 代码**以 `renderpasses.Code` 为准**覆盖，
+  但要求同 `PassIndex` **且 pass 类型一致**；`RawJson` 空或坏掉时按三张表重建（工程里带"按表重建"提示）。
+- **图片**：JSON 里的 `/media/a/x.png` 保持原样，落到 `<数据根>/media/media/a/x.png`；
+  `ResolveTexturePath` 第 1 步"搜索目录 + 相对路径"直接命中，不需要再下载或改写 JSON。
+- **下线**：库面板的下载/导入/删除/收藏/占用/补齐资源，CLI 的 `--download`、`--import`、`--fetch-missing`、
+  `--proxy`、`--library` 全部移除；`LocalLibrary`（文件布局的删除/占用/最近播放）删除。
+  `ShaderToyDownloader` / `LocalJsonImporter` / `MissingResourceFetcher` / `ShaderMeta` 保留给测试与工具，播放侧不引用。
+- **坑 1**：缺图统计不能把所有带 `FilePath` 的 input 都算上 —— keyboard/music 的 `FilePath` 是站点预设图
+  （`/presets/tex00.jpg`，不在 `media/` 里），按老口径 `73KXRh` 会误报"缺 2 个图"。现只算 texture/cubemap/volume。
+- **坑 2**：库里 `renderpasses` 的顺序不保证和 `RawJson` 一致（`73ySRh` 是 image/common/buffer 混排），
+  所以覆盖代码前要校验 pass 类型，否则会把 Buffer 的代码塞给 Image。
+- **垂直同步默认打开**：`EglContext.CreateForWindow` 的 `vsync` 参数从 `false` 改成默认 `true`
+  （`eglSwapInterval(1)`），另加 `--no-vsync` 关闭；启动日志打 `VSync: 开（跟随显示器刷新率）/ 关`。
+  **实测**（RTX 5060，`--shot-frames 40`）：开 → 39 帧 / 0.42s（≈93 Hz，贴着本机刷新率）；
+  关 → 39 帧 / 0.22s（≈175 FPS，跑满）。`--fixed-dt` 的确定性不受影响（时间步固定，与交换节奏无关）。
+- **多显卡选择**：加 `--gpu`（`list` / 编号 / 名字片段 / `luid:xxxxxxxx`）与 `shadertoy.json` 的 `gpu` 字段。
+  实现 `Rendering.Gles3/GpuAdapter.cs`：`dxgi.dll` 的 `IDXGIFactory1::EnumAdapters1`（vtable 槽 12）+
+  `IDXGIAdapter1::GetDesc1`（槽 10）拿 LUID/名称/显存；`EglContext` 把 LUID 拆成
+  `EGL_PLATFORM_ANGLE_DEVICE_ID_HIGH/LOW_ANGLE` 传给 `eglGetPlatformDisplayEXT`。
+  **坑**：这两个属性的值是 **0x34D6/0x34D7**，不是 0x348E/0x348F —— `0x348F` 其实是
+  `EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE`，写错时 ANGLE 不报错、直接回落到默认卡（现象：`--gpu 1`
+  看着"成功"但 `GL renderer` 仍是核显）。排查手法：临时把 `EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE` 改成
+  WARP 看 renderer 会不会变成 `Microsoft Basic Render Driver`（会 → 属性链路没问题，问题在属性名/值）。
+  **实测**（本机 AMD 610M + RTX 5060 Laptop）：`--gpu list` 列出 4 项（AMD×2、NVIDIA、Microsoft Basic Render
+  Driver[软件]）；`--gpu 1` / `--gpu nvidia` → `GL renderer : ANGLE (NVIDIA, NVIDIA GeForce RTX 5060 Laptop GPU ...)`；
+  不带参数 → 仍是 `ANGLE (AMD, AMD Radeon(TM) 610M ...)`（系统默认）；`--gpu 9` → 打印候选 + 回落系统默认。
+  `GpuAdaptersTests` 10 个用例覆盖索引/名称（含多命中取大显存）/LUID/错误提示。
+- **配置文件改名搬家**：`settings.json` → **exe 目录下的 `shadertoy.json`**（示例：
+  `{"dataDir": "F:\\code\\ShaderToySnap\\output"}`）。跟着程序目录走、方便手改；
+  `%APPDATA%\MilkDropShaderToy\settings.json` 只作只读兼容（新文件不存在时才读），写回时落到新位置。
+- **列表只读名字列（懒加载）**：`ShaderLibrary.Scan` 的 SQL 只有
+  `select ShaderId, Name, UserName, CapturedAt from shaders`，不再带两个 count 子查询；
+  pass 数 / 缺图 / 标签改由 `ShaderDatabase.TryReadDetails(id)` 在打开作品时查（`--list` 显式命令才逐条补查）。
+  回归测试：`Scan_OnlyNeedsShadersTable` 故意只建 `shaders` 表，列表照样能出（细节查询返回 null 而不抛）。
+- **左栏底部**去掉"双击播放 / 右键：播放·打开数据目录"提示行，只留数据库路径；列表项不再显示"缺 N 图"标记，
+  tooltip 只给标题/ID/作者 —— 详情统一在打开后的右侧主控面板里看。
+- **实测**：`--list` 列出 `F:\code\ShaderToySnap\output` 里 8 个作品（含标题/作者/pass 数/抓取时间）；
+  `73KXRh`（2 pass + 贴图）与 `73ySRh`（image/common/buffer）都能正常出帧，贴图从 `media/media/a/` 取到、
+  控制台无"找不到图片"；`--shot` 截图确认左栏列表单行不换行、底部显示数据库路径。
+- **测试**：`ShaderDatabaseTests`（RawJson 路径、表重建、代码覆盖、类型不一致不覆盖、坏 ID/坏文件）与
+  `ShaderLibraryTests`（列表/排序/缺图统计/Find/Search/坏库）合计 10 个用例。

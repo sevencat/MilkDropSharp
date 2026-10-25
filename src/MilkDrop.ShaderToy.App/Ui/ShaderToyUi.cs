@@ -12,9 +12,9 @@ namespace MilkDrop.ShaderToy.App.Ui;
 /// </summary>
 /// <remarks>
 /// <para>
-/// **界面不编辑作品**。事实来源永远是磁盘上的 <c>project.json</c>：在外部编辑器里改完，
-/// 回到界面点"重新加载"重新读入（<see cref="ReloadRequested"/> 由 <c>Program</c> 在下一帧开头执行，
-/// 避免在 ImGui 帧中途换掉 GL 资源）。
+/// **界面不编辑作品**。事实来源是数据根下的 <c>shadertoy.db</c>（图片在 <c>media/</c>）：
+/// 在外部改完，回到界面点"重新加载"重新读入（<see cref="ReloadRequested"/> 由 <c>Program</c>
+/// 在下一帧开头执行，避免在 ImGui 帧中途换掉 GL 资源）。
 /// </para>
 /// <para>
 /// 界面状态（选中项、Toast、截图/全屏请求）留在这里；截图必须在画 UI 之前执行，
@@ -38,28 +38,36 @@ internal sealed class ShaderToyUi : IDisposable
     private bool _disposed;
 
     /// <param name="player">播放器。</param>
-    /// <param name="libraryRoot">本地库根目录。</param>
+    /// <param name="dataRoot">数据根目录（<c>shadertoy.db</c> + <c>media/</c>）。</param>
     /// <param name="uiScale">DPI 缩放（面板尺寸跟着放大，否则高 DPI 下字号变大、面板反而放不下按钮）。</param>
-    /// <param name="ownerWindow">"打开文件"对话框的父窗口句柄（0 表示不指定）。</param>
-    public ShaderToyUi(Player player, string libraryRoot, float uiScale = 1f, nint ownerWindow = default)
+    /// <param name="ownerWindow">"打开文件"对话框的父窗口句柄（0 表示不指定，留给将来的对话框）。</param>
+    public ShaderToyUi(Player player, string dataRoot, float uiScale = 1f, nint ownerWindow = default)
     {
         ArgumentNullException.ThrowIfNull(player);
 
         _player = player;
         _scale = Math.Clamp(uiScale, 0.5f, 3f);
-        _library = new LibraryPanel(libraryRoot, ownerWindow);
-        _library.AssetsFetched += OnAssetsFetched;
+        _library = new LibraryPanel(dataRoot);
         _library.ReloadRequested += () => ReloadRequested?.Invoke();
     }
 
-    /// <summary>请求把某个 JSON 打开（拖拽/列表双击）；由 Program 负责真正加载。</summary>
-    public event Action<string>? OpenRequested;
+    /// <summary>请求播放数据库里的某个作品（列表双击/右键）；由 Program 负责真正加载。</summary>
+    public event Action<ShaderLibraryEntry>? OpenEntryRequested;
 
-    /// <summary>请求从磁盘重新读入当前作品；由 Program 在下一帧开头执行。</summary>
+    /// <summary>请求打开一个磁盘上的 JSON（拖进窗口）；由 Program 负责真正加载。</summary>
+    public event Action<string>? OpenFileRequested;
+
+    /// <summary>请求从数据库重新读入当前作品；由 Program 在下一帧开头执行。</summary>
     public event Action? ReloadRequested;
 
-    /// <summary>库根目录（命令行 <c>--library</c> 或默认值）。</summary>
-    public string LibraryRoot => _library.Root;
+    /// <summary>数据根目录。</summary>
+    public string DataRoot => _library.DataRoot;
+
+    /// <summary>作品数据库路径（<c>&lt;数据根&gt;/shadertoy.db</c>）。</summary>
+    public string DatabasePath => _library.DatabasePath;
+
+    /// <summary>当前扫到的作品数。</summary>
+    public int EntryCount => _library.EntryCount;
 
     /// <summary>请求截一张图（快捷键 F12 走这里，和按钮同一条路径）。</summary>
     public void RequestScreenshot() => _screenshotRequested = true;
@@ -91,22 +99,17 @@ internal sealed class ShaderToyUi : IDisposable
     }
 
     /// <summary>
-    /// 播放后更新列表里的"最近播放"（就地改，不重排 —— 顺序在扫描时已固定）。
-    /// </summary>
-    public void MarkPlayed(string projectPath, DateTimeOffset when) => _library.MarkPlayed(projectPath, when);
-
-    /// <summary>
     /// 处理拖进窗口的文件：<c>.json</c> 直接打开；界面不编辑作品，其他文件只给提示。
     /// </summary>
     public void OnFileDropped(string path)
     {
         if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
         {
-            OpenRequested?.Invoke(path);
+            OpenFileRequested?.Invoke(path);
             return;
         }
 
-        Toast("只支持拖入 .json 工程文件；图片等资源请写进 project.json 后用\"重新加载\"。");
+        Toast("只支持拖入 .json 工程文件；作品数据请由 ShaderToySnap 写进 shadertoy.db。");
     }
 
     /// <summary>画全部窗口。<paramref name="width"/>/<paramref name="height"/> 是帧缓冲尺寸。</summary>
@@ -128,7 +131,7 @@ internal sealed class ShaderToyUi : IDisposable
 
         if (open is not null)
         {
-            OpenRequested?.Invoke(open.ProjectPath);
+            OpenEntryRequested?.Invoke(open);
         }
 
         // 布局：左=库，右=主控（高度自适应内容，画面在它下面完整可见）
@@ -150,35 +153,6 @@ internal sealed class ShaderToyUi : IDisposable
 
         _disposed = true;
         _library.Dispose();
-    }
-
-    /// <summary>补齐资源后：补的若是正在播的作品，请求一次重新加载（纹理才会真的换上）。</summary>
-    private void OnAssetsFetched(string directory)
-    {
-        if (_player.SourceName == Player.BuiltinSource)
-        {
-            return;
-        }
-
-        string? projectDirectory;
-
-        try
-        {
-            projectDirectory = Path.GetDirectoryName(Path.GetFullPath(_player.SourceName));
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return;
-        }
-
-        if (projectDirectory is null
-            || !string.Equals(projectDirectory, directory, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        Toast("资源已补齐，正在重新加载…");
-        ReloadRequested?.Invoke();
     }
 
     private void DrawMainWindow(int width, int height, double fps, bool imguiCapturesKeyboard)
@@ -211,7 +185,7 @@ internal sealed class ShaderToyUi : IDisposable
 
         if (ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip("从磁盘重新读入当前作品。\n在外部编辑器里改完 project.json / textures 后点这里；读入失败时保留当前画面。");
+            ImGui.SetTooltip("从数据库重新读入当前作品。\n在库里改过代码、或 media/ 里补了图之后点这里；读入失败时保留当前画面。");
         }
 
         ImGui.SameLine();
@@ -284,7 +258,7 @@ internal sealed class ShaderToyUi : IDisposable
         }
 
         ImGui.Separator();
-        ImGui.TextDisabled($"来源: {player.SourceName}");
+        ImGui.TextDisabled($"来源: {player.SourceDescription}");
         if (player.Project is { } project)
         {
             ImGui.TextDisabled(
@@ -293,12 +267,12 @@ internal sealed class ShaderToyUi : IDisposable
         }
 
         ImGui.TextDisabled(imguiCapturesKeyboard ? "键盘被界面占用" : "空格 暂停 / R 重置 / F11 全屏 / F12 截图");
-        ImGui.TextDisabled("界面不编辑作品：外部改文件后点\"重新加载\"");
+        ImGui.TextDisabled("界面不编辑作品：外部改完库后点\"重新加载\"");
 
         ImGui.End();
     }
 
-    /// <summary>通道绑定（只读展示；改它请改 project.json 后重新加载）。</summary>
+    /// <summary>通道绑定（只读展示；改它请改库后重新加载）。</summary>
     private void DrawChannelInfo()
     {
         if (_player.Project is not { } project)

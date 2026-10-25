@@ -69,7 +69,7 @@ public sealed record DownloadResult(
 /// <para>
 /// 流程：取页面 → 抠内嵌 JSON（<see cref="ShaderToyPage"/>）→ 用容忍型导入器校验/取元信息 →
 /// 按 <c>inputs[]</c> 下载资源到 <c>textures/</c> → **在 JSON 原文上**把资源路径改成相对路径
-/// （<see cref="JsonTextRewriter"/>）→ 写 <c>project.json</c>（原样保真）+ <c>meta.json</c> + <c>thumbnail.*</c>。
+/// （<see cref="JsonTextRewriter"/>）→ 写 <c>raw.json</c>（原样保真）+ <c>meta.json</c> + <c>thumbnail.*</c>。
 /// </para>
 /// <para>
 /// 单个资源失败不中断整次下载：只记进 <see cref="ShaderMeta.MissingResources"/>，
@@ -90,7 +90,7 @@ public sealed class ShaderToyDownloader
         + "Chrome/131.0.0.0 Safari/537.36";
 
     /// <summary>资源子目录（相对作品目录，整目录可整体拷走）。</summary>
-    public const string TextureFolder = "textures";
+    public const string TextureFolder = ShaderFiles.TextureFolder;
 
     private static readonly Regex IdPattern = new("^[A-Za-z0-9]{4,16}$", RegexOptions.Compiled);
 
@@ -353,16 +353,16 @@ public sealed class ShaderToyDownloader
 
         try
         {
-            // project.json：上游格式，只改写资源路径，其余原样（S8-3）
+            // raw.json：上游格式，只改写资源路径，其余原样（S8-3）；文件名与 ShaderToySnap 一致
             await File.WriteAllTextAsync(
-                Path.Combine(directory, "project.json"),
+                Path.Combine(directory, ShaderFiles.RawProject),
                 savedJson,
                 Utf8NoBom,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return Failure(id, pageUrl, directory, "写入 project.json 失败：" + ex.Message);
+            return Failure(id, pageUrl, directory, $"写入 {ShaderFiles.RawProject} 失败：" + ex.Message);
         }
 
         ShaderMeta? previous = ShaderMeta.TryLoad(directory);

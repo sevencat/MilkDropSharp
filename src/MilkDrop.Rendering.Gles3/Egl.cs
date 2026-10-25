@@ -71,6 +71,19 @@ public static class Egl
     public const int PlatformAngleDeviceTypeWarpAngle = 0x320B;
     public const int PlatformAngleTypeVulkanAngle = 0x3450;
 
+    /// <summary>
+    /// EGL_PLATFORM_ANGLE_DEVICE_ID_HIGH_ANGLE / _LOW_ANGLE（EGL_ANGLE_platform_angle_device_id）：
+    /// 按 LUID 指定用哪块 D3D 适配器（多显卡时选卡用，值来自 <see cref="GpuAdapters"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 注意是 <c>0x34D6/0x34D7</c>：<c>0x348F</c> 是 <c>EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE</c>，
+    /// 拿它当设备 ID 用，ANGLE 会当成未知/非法属性悄悄回落到默认卡（踩过）。
+    /// </remarks>
+    public const int PlatformAngleDeviceIdHighAngle = 0x34D6;
+
+    /// <inheritdoc cref="PlatformAngleDeviceIdHighAngle"/>
+    public const int PlatformAngleDeviceIdLowAngle = 0x34D7;
+
     // ---- 入口 ----
 
     [DllImport(LibName, EntryPoint = "EGL_GetError", CallingConvention = CallingConvention.Cdecl)]

@@ -33,7 +33,7 @@ public sealed class LocalJsonImporterTests : IDisposable
         Assert.True(File.Exists(Path.Combine(directory, "textures", "hash.png")));
         Assert.True(File.Exists(source));   // 拷贝不是移动
 
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("\"filepath\":\"textures/hash.png\"", project);
         Assert.DoesNotContain("img/hash.png", project);
         Assert.DoesNotContain('\n', project);   // 原文单行，没有被重新格式化
@@ -45,9 +45,9 @@ public sealed class LocalJsonImporterTests : IDisposable
         Assert.Equal("nabr", meta.Author);
         Assert.Empty(meta.MissingResources);
 
-        ShaderLibraryEntry entry = Assert.Single(ShaderLibrary.Scan(LibraryRoot).Entries);
-        Assert.Equal("lunchbreak", entry.Id);
-        Assert.Equal(0, entry.MissingResources);
+        // 文件布局：raw.json + textures/（播放侧的数据源现在是 shadertoy.db，这里只验证导入产物）
+        Assert.True(File.Exists(Path.Combine(directory, ShaderFiles.RawProject)));
+        Assert.True(File.Exists(Path.Combine(directory, "textures", "hash.png")));
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public sealed class LocalJsonImporterTests : IDisposable
         string directory = Path.Combine(LibraryRoot, "absolute");
         Assert.True(File.Exists(Path.Combine(directory, "textures", "hash.png")));
 
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("\"filepath\":\"textures/hash.png\"", project);
         Assert.DoesNotContain(sourceDirectory.Replace('\\', '/'), project);
     }
@@ -85,14 +85,11 @@ public sealed class LocalJsonImporterTests : IDisposable
         Assert.True(result.Success, result.Error);
 
         string directory = Path.Combine(LibraryRoot, "withsitepath");
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("media", project);      // 本地拿不到就保持原样
 
         ShaderMeta meta = Assert.IsType<ShaderMeta>(ShaderMeta.TryLoad(directory));
         Assert.Single(meta.MissingResources);
-
-        ShaderLibraryEntry entry = Assert.Single(ShaderLibrary.Scan(LibraryRoot).Entries);
-        Assert.Equal(1, entry.MissingResources);
     }
 
     [Fact]
@@ -118,7 +115,7 @@ public sealed class LocalJsonImporterTests : IDisposable
             Assert.True(File.Exists(Path.Combine(directory, "textures", $"cube_{face}.png")), $"缺第 {face} 面");
         }
 
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("\"filepath\":\"textures/cube_0.png\"", project);
     }
 
@@ -161,7 +158,7 @@ public sealed class LocalJsonImporterTests : IDisposable
     [Fact]
     public void Import_OwnProjectJsonInLibrary_Fails()
     {
-        // 先从别处导入一个作品，再"导入"库里它自己的 project.json
+        // 先从别处导入一个作品，再"导入"库里它自己的 raw.json
         string source = Path.Combine(NewSourceDirectory(), "self.json");
         File.WriteAllText(source, Project(""));
 
@@ -169,7 +166,7 @@ public sealed class LocalJsonImporterTests : IDisposable
         ImportResult first = importer.Import(source);
         Assert.True(first.Success, first.Error);
 
-        ImportResult again = importer.Import(Path.Combine(first.Directory!, "project.json"));
+        ImportResult again = importer.Import(Path.Combine(first.Directory!, ShaderFiles.RawProject));
 
         Assert.False(again.Success);
         Assert.Contains("已经在库里", again.Error);

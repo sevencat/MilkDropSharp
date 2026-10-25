@@ -1,152 +1,150 @@
 using MilkDrop.ShaderToy.Import;
+
 using Xunit;
-using Xunit.Abstractions;
 
 namespace MilkDrop.ShaderToy.Tests.Import;
 
-/// <summary>
-/// 本地库扫描（P7 左侧列表的数据源）：两种目录布局、meta.json 优先、手工放进去也能扫到。
-/// </summary>
-public sealed class ShaderLibraryTests(ITestOutputHelper output) : IDisposable
+public sealed class ShaderLibraryTests : IDisposable
 {
-    private readonly string _root = CreateTempRoot();
+    private readonly string _root = Path.Combine(
+        Path.GetTempPath(),
+        "milkdrop-stlib-" + Guid.NewGuid().ToString("N"));
 
-    [Fact]
-    public void Scan_FindsStandardLayoutAndFlatJson()
-    {
-        WriteProject(Path.Combine(_root, "flGyWc"), "lunchbreak", "nabr");
-        WriteProject(Path.Combine(_root, "A1b2C3"), "Fractal Land", "Kali");
-
-        // 平铺布局：根目录直接放 json（仓库里的 res/shadertoy/stpreset 就是这种）
-        File.WriteAllText(Path.Combine(_root, "XlfGRj.json"), MinimalProject("Star Nest", "Kali"));
-
-        ShaderLibrary library = ShaderLibrary.Scan(_root);
-
-        Assert.Empty(library.Warnings);
-        Assert.Equal(3, library.Entries.Count);
-
-        ShaderLibraryEntry fractal = library.Entries.Single(e => e.Id == "A1b2C3");
-        Assert.Equal("Fractal Land", fractal.Title);
-        Assert.Equal("Kali", fractal.Author);
-        Assert.Equal("A1b2C3", fractal.Id);
-
-        ShaderLibraryEntry flat = library.Entries.Single(e => e.Id == "XlfGRj");
-        Assert.Equal("Star Nest", flat.Title);
-        Assert.Equal(_root, flat.Directory);
-    }
-
-    [Fact]
-    public void Scan_PrefersMetaJson_AndSkipsFullParse()
-    {
-        string directory = Path.Combine(_root, "Ms2SD1");
-        WriteProject(directory, "Seascape", "TDM");
-
-        // meta.json 与 project.json 冲突时以 meta.json 为准（P8 下载后的标准布局）
-        File.WriteAllText(
-            Path.Combine(directory, "meta.json"),
-            """{ "id": "Ms2SD1", "title": "Seascape (本地改名)", "author": "TDM" }""");
-
-        ShaderLibrary library = ShaderLibrary.Scan(_root);
-
-        ShaderLibraryEntry entry = Assert.Single(library.Entries);
-        Assert.Equal("Seascape (本地改名)", entry.Title);
-    }
-
-    [Fact]
-    public void Scan_ToleratesBrokenJson_AndStillListsIt()
-    {
-        string directory = Path.Combine(_root, "broken");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "project.json"), "{ this is not json ");
-
-        ShaderLibrary library = ShaderLibrary.Scan(_root);
-
-        ShaderLibraryEntry entry = Assert.Single(library.Entries);
-        Assert.Equal("broken", entry.Id);                 // 退回目录名
-        Assert.Equal("broken", entry.DisplayName);
-        Assert.NotEmpty(library.Warnings);                // 但提示里要说清楚
-        output.WriteLine(string.Join(" | ", library.Warnings));
-    }
-
-    [Fact]
-    public void Scan_MissingRoot_ReturnsEmptyWithWarning()
-    {
-        ShaderLibrary library = ShaderLibrary.Scan(Path.Combine(_root, "nope"));
-
-        Assert.Empty(library.Entries);
-        Assert.Single(library.Warnings);
-        Assert.Contains("库目录不存在", library.Warnings[0]);
-    }
-
-    [Fact]
-    public void Search_MatchesIdTitleAndAuthor()
-    {
-        WriteProject(Path.Combine(_root, "flGyWc"), "lunchbreak", "nabr");
-        WriteProject(Path.Combine(_root, "A1b2C3"), "Fractal Land", "Kali");
-
-        ShaderLibrary library = ShaderLibrary.Scan(_root);
-
-        Assert.Equal(2, library.Search(null).Count());
-        Assert.Equal(2, library.Search("  ").Count());
-        Assert.Equal("A1b2C3", library.Search("kali").Single().Id);       // 作者（大小写不敏感）
-        Assert.Equal("flGyWc", library.Search("LUNCH").Single().Id);      // 标题
-        Assert.Single(library.Search("flGy"));                            // ID 片段
-        Assert.Empty(library.Search("zzz"));
-    }
-
-    [Fact]
-    public void Scan_FindsThumbnailNextToProject()
-    {
-        string directory = Path.Combine(_root, "withThumb");
-        WriteProject(directory, "With Thumb", "me");
-        File.WriteAllBytes(Path.Combine(directory, "thumbnail.png"), [0x89, 0x50, 0x4E, 0x47]);
-
-        ShaderLibrary library = ShaderLibrary.Scan(_root);
-
-        Assert.NotNull(Assert.Single(library.Entries).ThumbnailPath);
-    }
+    public ShaderLibraryTests() => Directory.CreateDirectory(_root);
 
     public void Dispose()
     {
         try
         {
-            Directory.Delete(_root, recursive: true);
+            Directory.Delete(_root, true);
         }
         catch (IOException)
         {
-            // 临时目录清不掉不影响测试结论
+            // 临时目录删不掉不影响结论
         }
     }
 
-    private static string CreateTempRoot()
+    private string DatabasePath => Path.Combine(_root, ShaderDatabase.FileName);
+
+    [Fact]
+    public void Scan_WithoutDatabase_ReturnsEmptyWithWarning()
     {
-        string root = Path.Combine(Path.GetTempPath(), "mds-library-" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(root);
-        return root;
+        ShaderLibrary library = ShaderLibrary.Scan(_root);
+
+        Assert.Empty(library.Entries);
+        Assert.Single(library.Warnings);
+        Assert.Contains("shadertoy.db", library.Warnings[0]);
+        Assert.Equal(DatabasePath, library.DatabasePath);
     }
 
-    private static void WriteProject(string directory, string title, string author)
+    [Fact]
+    public void Scan_ReadsNamesNewestFirst()
     {
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "project.json"), MinimalProject(title, author));
+        TestDatabase.Create(DatabasePath);
+
+        TestDatabase.AddShader(DatabasePath, "old001", "Older Work", "alice", "2026-01-01 08:00:00", "raymarch,3d");
+        TestDatabase.AddPass(DatabasePath, "old001", 0, "image", "void mainImage(out vec4 c, in vec2 f){c=vec4(0);}");
+
+        TestDatabase.AddShader(DatabasePath, "new002", "Newer Work", "bob", "2026-05-06 07:08:09", "sdf");
+        TestDatabase.AddPass(DatabasePath, "new002", 0, "common", "float x(){return 1.;}");
+        TestDatabase.AddPass(DatabasePath, "new002", 1, "image", "void mainImage(out vec4 c, in vec2 f){c=vec4(1);}");
+
+        ShaderLibrary library = ShaderLibrary.Scan(_root);
+
+        Assert.Empty(library.Warnings);
+        Assert.Equal(2, library.Entries.Count);
+
+        ShaderLibraryEntry newest = library.Entries[0];
+        Assert.Equal("new002", newest.Id);
+        Assert.Equal("Newer Work", newest.Title);
+        Assert.Equal("bob", newest.Author);
+        Assert.Equal(DatabasePath, newest.DatabasePath);
+        Assert.Equal(new DateTime(2026, 5, 6, 7, 8, 9), newest.CapturedAt);
+        Assert.Equal("Newer Work", newest.DisplayName);
+
+        Assert.Equal("old001", library.Entries[1].Id);
     }
 
-    private static string MinimalProject(string title, string author) =>
-        $$"""
-        [
-          {
-            "ver": "0.1",
-            "info": { "id": "test", "name": "{{title}}", "username": "{{author}}" },
-            "renderpass": [
-              {
-                "type": "image",
-                "name": "Image",
-                "code": "void mainImage(out vec4 c, in vec2 f) { c = vec4(1.0); }",
-                "inputs": [],
-                "outputs": []
-              }
-            ]
-          }
-        ]
-        """;
+    [Fact]
+    public void Scan_OnlyNeedsShadersTable()
+    {
+        // 列表只读名字那几列：故意只建 shaders 表，不建 renderpasses/inputs/outputs
+        TestDatabase.CreateShadersOnly(DatabasePath);
+        TestDatabase.AddShader(DatabasePath, "abc123", "Name only", "alice");
+
+        ShaderLibrary library = ShaderLibrary.Scan(_root);
+
+        Assert.Empty(library.Warnings);
+        ShaderLibraryEntry entry = Assert.Single(library.Entries);
+        Assert.Equal("abc123", entry.Id);
+        Assert.Equal("Name only", entry.Title);
+
+        // 细节是按需查的：表都不存在 → 明确返回 null，而不是让列表挂掉
+        Assert.Null(library.TryReadDetails(entry));
+    }
+
+    [Fact]
+    public void TryReadDetails_ReturnsCountsAndTags()
+    {
+        TestDatabase.Create(DatabasePath);
+        TestDatabase.AddShader(DatabasePath, "old001", "Older Work", "alice", tags: "raymarch,3d");
+        TestDatabase.AddPass(DatabasePath, "old001", 0, "image", "");
+        TestDatabase.AddInput(DatabasePath, "old001", 0, 0, "texture", "/media/a/hash.png", "media/a/hash.png");
+        TestDatabase.AddInput(DatabasePath, "old001", 0, 1, "texture", "/media/a/other.png");
+        TestDatabase.AddInput(DatabasePath, "old001", 0, 2, "keyboard");
+
+        ShaderLibraryEntry entry = Assert.Single(ShaderLibrary.Scan(_root).Entries);
+        ShaderDatabaseDetails? details = ShaderLibrary.Scan(_root).TryReadDetails(entry);
+
+        Assert.NotNull(details);
+        Assert.Equal(1, details.PassCount);
+        Assert.Equal(1, details.MissingMedia);          // keyboard 的 /presets/... 不算缺图
+        Assert.Equal(["raymarch", "3d"], details.Tags);
+    }
+
+    [Fact]
+    public void Find_IsCaseInsensitive_AndFallsBackToSubstring()
+    {
+        TestDatabase.Create(DatabasePath);
+        TestDatabase.AddShader(DatabasePath, "flGyWc", "Lunchbreak", "nabr");
+        TestDatabase.AddPass(DatabasePath, "flGyWc", 0, "image", "");
+
+        ShaderLibrary library = ShaderLibrary.Scan(_root);
+
+        Assert.Equal("flGyWc", library.Find("flgywc")?.Id);
+        Assert.Equal("flGyWc", library.Find("gyw")?.Id);
+        Assert.Null(library.Find("nope"));
+        Assert.Null(library.Find(""));
+    }
+
+    [Fact]
+    public void Search_MatchesIdTitleAndAuthor()
+    {
+        TestDatabase.Create(DatabasePath);
+        TestDatabase.AddShader(DatabasePath, "aaa111", "Ray Marching", "iq", tags: "raymarch,sdf");
+        TestDatabase.AddPass(DatabasePath, "aaa111", 0, "image", "");
+        TestDatabase.AddShader(DatabasePath, "bbb222", "Plasma", "someone", tags: "noise");
+        TestDatabase.AddPass(DatabasePath, "bbb222", 0, "image", "");
+
+        ShaderLibrary library = ShaderLibrary.Scan(_root);
+
+        Assert.Equal(2, library.Search(null).Count());
+        Assert.Equal("bbb222", Assert.Single(library.Search("plasma")).Id);
+        Assert.Equal("aaa111", Assert.Single(library.Search("iq")).Id);
+        Assert.Equal("bbb222", Assert.Single(library.Search("bbb2")).Id);
+
+        // 标签不在列表里（细节按需查），所以不参与过滤
+        Assert.Empty(library.Search("sdf"));
+    }
+
+    [Fact]
+    public void Scan_BrokenDatabaseFile_WarnsInsteadOfThrowing()
+    {
+        File.WriteAllText(DatabasePath, "this is not a sqlite database");
+
+        ShaderLibrary library = ShaderLibrary.Scan(_root);
+
+        Assert.Empty(library.Entries);
+        Assert.NotEmpty(library.Warnings);
+    }
 }

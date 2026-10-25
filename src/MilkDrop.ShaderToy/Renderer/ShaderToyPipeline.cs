@@ -576,12 +576,14 @@ public sealed class ShaderToyPipeline : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 下载后的作品（P8）里写的是相对路径 <c>textures/xxx.jpg</c>，基准是**作品目录** ——
-    /// 搜索目录里先按整条相对路径找，再退回"只按文件名找"（兼容手工整理的工程）。
+    /// 搜索目录通常有：作品目录、<c>&lt;数据根&gt;/media</c>（ShaderToySnap 抓下来的图）、
+    /// <c>&lt;数据根&gt;</c> 本身。每个目录里按三种写法试：整条相对路径、只按文件名、<c>textures/</c> 下的文件名。
     /// </para>
     /// <para>
-    /// 没下载过的作品里还是站点绝对路径（<c>/media/a/...</c>）：按文件名在作品目录、
-    /// 以及作品目录的 <c>textures/</c> 里找 —— 手工把图丢进 <c>textures/</c> 就能直接用。
+    /// 站点路径（<c>/media/a/xxx.png</c>）先去掉前导分隔符变成相对路径：ShaderToySnap 把
+    /// <c>/media/a/x.png</c> 存在 <c>&lt;数据根&gt;/media/media/a/x.png</c>，所以"搜索目录 + 相对路径"
+    /// 正好命中；我们下载过的作品写的是 <c>textures/x.png</c>，同样命中第一种。
+    /// 手工把图丢进 <c>textures/</c> 时靠第三种兜底（S8-7）。
     /// </para>
     /// </remarks>
     private string? ResolveTexturePath(string? path)
@@ -596,13 +598,22 @@ public sealed class ShaderToyPipeline : IDisposable
             return path;
         }
 
-        string fileName = Path.GetFileName(path);
+        // 统一成"不带前导分隔符"的相对路径（站点路径 /media/a/x.png → media/a/x.png）
+        string relative = path.Replace('\\', '/').TrimStart('/');
+
+        int query = relative.IndexOf('?');
+        if (query >= 0)
+        {
+            relative = relative[..query];
+        }
+
+        string fileName = Path.GetFileName(relative);
         if (fileName.Length == 0)
         {
             return null;
         }
 
-        string relative = path.Replace('/', Path.DirectorySeparatorChar);
+        string localRelative = relative.Replace('/', Path.DirectorySeparatorChar);
 
         foreach (string directory in _options.TextureSearchPaths)
         {
@@ -611,17 +622,17 @@ public sealed class ShaderToyPipeline : IDisposable
                 continue;
             }
 
-            // 1) 作品目录 + 相对路径（textures/noise.jpg）
-            if (!Path.IsPathRooted(relative))
+            // 1) 搜索目录 + 相对路径（textures/noise.jpg、media/a/hash.png）
+            if (!Path.IsPathRooted(localRelative))
             {
-                string candidate = Path.Combine(directory, relative);
+                string candidate = Path.Combine(directory, localRelative);
                 if (File.Exists(candidate))
                 {
                     return candidate;
                 }
             }
 
-            // 2) 只按文件名（老工程把图放在 project.json 旁边）
+            // 2) 只按文件名（老工程把图放在工程 JSON 旁边）
             string byName = Path.Combine(directory, fileName);
             if (File.Exists(byName))
             {

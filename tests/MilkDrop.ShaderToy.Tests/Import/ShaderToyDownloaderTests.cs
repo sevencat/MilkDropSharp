@@ -32,7 +32,7 @@ public sealed class ShaderToyDownloaderTests
         string directory = Path.Combine(library.Root, "test01");
         Assert.Equal(directory, result.Directory);
 
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("\"filepath\":\"textures/hash.png\"", project);
         Assert.DoesNotContain("/media/a/hash.png", project);   // 站点路径已改写
         Assert.DoesNotContain('\n', project);                  // 原文是单行 JSON，没有被重新格式化
@@ -49,13 +49,6 @@ public sealed class ShaderToyDownloaderTests
         Assert.Equal(FixedNow, meta.DownloadedAt);
         Assert.Equal(["sound", "demo"], meta.Tags);
         Assert.Empty(meta.MissingResources);
-
-        // 下载完立刻出现在本地库里（列表读的就是 meta.json）
-        ShaderLibraryEntry entry = Assert.Single(ShaderLibrary.Scan(library.Root).Entries);
-        Assert.Equal("Test Work", entry.Title);
-        Assert.Equal("tester", entry.Author);
-        Assert.Equal(0, entry.MissingResources);
-        Assert.NotNull(entry.ThumbnailPath);
     }
 
     [Fact]
@@ -76,15 +69,12 @@ public sealed class ShaderToyDownloaderTests
         string directory = Path.Combine(library.Root, "test01");
 
         // 拿不到就保持站点路径：加载时退化成黑纹理，UI 里标"缺资源"
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("media", project);
         Assert.DoesNotContain("textures/hash.png", project);
 
         ShaderMeta meta = Assert.IsType<ShaderMeta>(ShaderMeta.TryLoad(directory));
         Assert.Single(meta.MissingResources);
-
-        ShaderLibraryEntry entry = Assert.Single(ShaderLibrary.Scan(library.Root).Entries);
-        Assert.Equal(1, entry.MissingResources);
 
         // 404 属于"不可重试"，只请求一次
         Assert.Equal(1, handler.Hits["https://www.shadertoy.com/media/a/hash.png"]);
@@ -135,8 +125,9 @@ public sealed class ShaderToyDownloaderTests
         Assert.Equal(Path.Combine(library.Root, "test01-2"), copy.Directory);
         Assert.Contains(copy.Warnings, w => w.Contains("另存为"));
 
-        // 两个目录都能扫到（不产生重复 ID 的错觉：都是同一个作品的本地副本）
-        Assert.Equal(2, ShaderLibrary.Scan(library.Root).Entries.Count);
+        // 两份文件布局都在（播放侧不再读它们，抓取结果以 shadertoy.db 为准）
+        Assert.True(File.Exists(Path.Combine(library.Root, "test01", ShaderFiles.RawProject)));
+        Assert.True(File.Exists(Path.Combine(library.Root, "test01-2", ShaderFiles.RawProject)));
     }
 
     [Fact]
@@ -164,7 +155,7 @@ public sealed class ShaderToyDownloaderTests
             Assert.True(File.Exists(Path.Combine(directory, "textures", $"cube_{face}.png")), $"缺第 {face} 面");
         }
 
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("\"filepath\":\"textures/cube_0.png\"", project);
     }
 

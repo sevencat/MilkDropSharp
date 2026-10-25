@@ -35,7 +35,7 @@ public sealed record FetchResult(
 }
 
 /// <summary>
-/// 把 <c>project.json</c> 里还指向站点（<c>/media/a/xxx.png</c>、<c>http(s)://</c>）的资源抓下来，
+/// 把工程文件（<c>raw.json</c>／老的 <c>project.json</c>）里还指向站点（<c>/media/a/xxx.png</c>、<c>http(s)://</c>）的资源抓下来，
 /// 存进作品目录的 <c>textures/</c> 并把 JSON 改写成相对路径。
 /// </summary>
 /// <remarks>
@@ -68,7 +68,7 @@ public sealed class MissingResourceFetcher
     /// <summary>
     /// 补齐一个作品的缺失资源。
     /// </summary>
-    /// <param name="projectPathOrDirectory"><c>project.json</c> 或作品目录。</param>
+    /// <param name="projectPathOrDirectory"><c>raw.json</c>／<c>project.json</c> 或作品目录。</param>
     /// <param name="options">重试/并发等开关（<c>Now</c> 会被忽略）。</param>
     /// <param name="progress">进度文本（后台线程调用）。</param>
     /// <param name="cancellationToken">取消。</param>
@@ -85,10 +85,9 @@ public sealed class MissingResourceFetcher
             return Failure(directory, resolveError ?? "路径无效。");
         }
 
-        string projectPath = Path.Combine(directory, "project.json");
-        if (!File.Exists(projectPath))
+        if (ShaderFiles.FindProject(directory) is not { } projectPath)
         {
-            return Failure(directory, "目录里没有 project.json。");
+            return Failure(directory, $"目录里没有 {ShaderFiles.RawProject}。");
         }
 
         string rawJson;
@@ -102,7 +101,7 @@ public sealed class MissingResourceFetcher
                                        or System.Text.Json.JsonException or ShaderToyImportException
                                        or InvalidOperationException or ArgumentException)
         {
-            return Failure(directory, "project.json 读不出来：" + ex.Message);
+            return Failure(directory, $"{Path.GetFileName(projectPath)} 读不出来：" + ex.Message);
         }
 
         List<FetchRequest> requests = PlanRequests(project);
@@ -188,7 +187,7 @@ public sealed class MissingResourceFetcher
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                return Failure(directory, "写 project.json 失败：" + ex.Message);
+                return Failure(directory, $"写 {Path.GetFileName(projectPath)} 失败：" + ex.Message);
             }
         }
 

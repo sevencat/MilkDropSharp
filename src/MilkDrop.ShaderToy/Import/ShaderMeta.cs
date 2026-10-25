@@ -15,7 +15,7 @@ public sealed record MissingResource(string Url, string? Error);
 /// </summary>
 /// <remarks>
 /// <para>
-/// 与 <c>project.json</c> 严格分工：<c>project.json</c> 是上游格式，只改写资源路径、其余原样保真；
+/// 与工程文件（<c>raw.json</c>／老的 <c>project.json</c>）严格分工：工程文件是上游格式，只改写资源路径、其余原样保真；
 /// 来源 URL、下载时间、收藏、最近播放这些"我们自己的东西"全部写在 meta 里
 /// （见 <c>shaderToyIssue.md</c> S8-3）。
 /// </para>
@@ -32,7 +32,7 @@ public sealed class ShaderMeta
     /// <summary>Shadertoy 的短 ID（目录名以它的小写形式命名）。</summary>
     public string Id { get; set; } = string.Empty;
 
-    /// <summary>标题（可能被用户改过名，所以不直接取 project.json 的 info.name）。</summary>
+    /// <summary>标题（可能被用户改过名，所以不直接取工程 JSON 的 info.name）。</summary>
     public string Title { get; set; } = string.Empty;
 
     public string Author { get; set; } = string.Empty;

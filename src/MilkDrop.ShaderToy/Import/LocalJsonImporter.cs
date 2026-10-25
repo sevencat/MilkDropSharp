@@ -44,7 +44,7 @@ public sealed record ImportResult(
 /// 没法离线拿到，记进 <c>missingResources</c>，作品仍可导入（缺的通道用黑纹理）。
 /// </para>
 /// <para>
-/// <c>project.json</c> 保存**原文**（只改资源路径），与下载侧一致（S8-3）。
+/// <c>raw.json</c> 保存**原文**（只改资源路径），与下载侧一致（S8-3）。
 /// </para>
 /// </remarks>
 public sealed class LocalJsonImporter
@@ -130,7 +130,7 @@ public sealed class LocalJsonImporter
             warnings.Add($"同名作品已存在，已另存为 {Path.GetFileName(directory)}。");
         }
 
-        string projectPath = Path.Combine(directory, "project.json");
+        string projectPath = Path.Combine(directory, ShaderFiles.RawProject);
 
         var copied = new List<string>();
         var rewrite = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -166,7 +166,7 @@ public sealed class LocalJsonImporter
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return Failure(id, "写入 project.json 失败：" + ex.Message);
+            return Failure(id, $"写入 {ShaderFiles.RawProject} 失败：" + ex.Message);
         }
 
         ShaderMeta? previous = ShaderMeta.TryLoad(directory);

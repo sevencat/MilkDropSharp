@@ -33,7 +33,7 @@ public sealed class MissingResourceFetcherTests : IDisposable
 
         Assert.True(File.Exists(Path.Combine(directory, "textures", HashHex + ".png")));
 
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("\"filepath\":\"textures/" + HashHex + ".png\"", project);
         Assert.DoesNotContain("media\\/a\\/", project);   // 原文里的 \/ 转义形式
 
@@ -59,7 +59,7 @@ public sealed class MissingResourceFetcherTests : IDisposable
         Assert.Equal(1, result.Failed);
 
         // 下载失败：JSON 保持站点路径（原文的 \/ 转义形式）
-        Assert.Contains("media\\/a\\/", File.ReadAllText(Path.Combine(directory, "project.json")));
+        Assert.Contains("media\\/a\\/", File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject)));
 
         ShaderMeta meta = Assert.IsType<ShaderMeta>(ShaderMeta.TryLoad(directory));
         MissingResource missing = Assert.Single(meta.MissingResources);
@@ -90,7 +90,7 @@ public sealed class MissingResourceFetcherTests : IDisposable
             Assert.True(File.Exists(Path.Combine(directory, "textures", $"4dXGR8_{face}.png")), $"缺第 {face} 面");
         }
 
-        string project = File.ReadAllText(Path.Combine(directory, "project.json"));
+        string project = File.ReadAllText(Path.Combine(directory, ShaderFiles.RawProject));
         Assert.Contains("\"filepath\":\"textures/4dXGR8_0.png\"", project);
     }
 
@@ -124,7 +124,7 @@ public sealed class MissingResourceFetcherTests : IDisposable
         string directory = Path.Combine(_root, "work");
         Directory.CreateDirectory(directory);
 
-        File.WriteAllText(Path.Combine(directory, "project.json"), projectJson);
+        File.WriteAllText(Path.Combine(directory, ShaderFiles.RawProject), projectJson);
 
         var meta = new ShaderMeta { Id = "work", Title = "Work" };
 

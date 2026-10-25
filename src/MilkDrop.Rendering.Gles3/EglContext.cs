@@ -55,14 +55,18 @@ public sealed unsafe class EglContext : IDisposable
     /// <summary>为已有窗口（HWND）建 EGL 窗口表面 + ES3 上下文。</summary>
     /// <param name="hwnd">窗口句柄（Silk.NET.Windowing 的 <c>window.Native.Win32.Hwnd</c>）。</param>
     /// <param name="vsync">是否开启垂直同步（<c>eglSwapInterval</c>）。</param>
-    public static EglContext CreateForWindow(nint hwnd, bool vsync)
+    /// <param name="gpuAdapter">
+    /// 指定用哪块显卡（<see cref="GpuAdapters.Enumerate"/> 拿到的结果）；null = 交给系统默认
+    /// （跟随 Windows"图形设置"里的高性能/省电偏好）。
+    /// </param>
+    public static EglContext CreateForWindow(nint hwnd, bool vsync, GpuAdapter? gpuAdapter = null)
     {
         if (hwnd == 0)
         {
             throw new ArgumentException("窗口句柄为空。", nameof(hwnd));
         }
 
-        var (display, ownsDisplay, info) = CreateDisplay();
+        var (display, ownsDisplay, info) = CreateDisplay(gpuAdapter);
         try
         {
             var config = ChooseConfig(display, Egl.WindowBit);
@@ -90,12 +94,15 @@ public sealed unsafe class EglContext : IDisposable
     }
 
     /// <summary>建立一个不依赖窗口的 pbuffer 上下文（离屏渲染 / 单元测试）。</summary>
-    public static EglContext CreateOffscreen(int width, int height)
+    /// <param name="width">宽。</param>
+    /// <param name="height">高。</param>
+    /// <param name="gpuAdapter">指定显卡（null = 系统默认）。</param>
+    public static EglContext CreateOffscreen(int width, int height, GpuAdapter? gpuAdapter = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(height, 1);
 
-        var (display, ownsDisplay, info) = CreateDisplay();
+        var (display, ownsDisplay, info) = CreateDisplay(gpuAdapter);
         try
         {
             var config = ChooseConfig(display, Egl.PbufferBit);
@@ -187,10 +194,12 @@ public sealed unsafe class EglContext : IDisposable
     /// 优先用 EGL_ANGLE_platform_angle 指定 D3D11 后端（ANGLE 在 Windows 上的默认后端，
     /// 但显式指定能避免落到 D3D9/WARP）；扩展不可用时退回 <c>eglGetDisplay</c>。
     /// </summary>
-    private static (nint Display, bool OwnsDisplay, string Info) CreateDisplay()
+    private static (nint Display, bool OwnsDisplay, string Info) CreateDisplay(GpuAdapter? gpuAdapter)
     {
-        var display = CreateAngleDisplay();
-        var info = "eglGetPlatformDisplayEXT(EGL_ANGLE_platform_angle, D3D11)";
+        var display = CreateAngleDisplay(gpuAdapter);
+        var info = gpuAdapter is null
+            ? "eglGetPlatformDisplayEXT(EGL_ANGLE_platform_angle, D3D11)"
+            : $"eglGetPlatformDisplayEXT(EGL_ANGLE_platform_angle, D3D11, device={gpuAdapter.Description} LUID={gpuAdapter.Luid:X})";
 
         if (display == Egl.NoDisplay)
         {
@@ -223,7 +232,7 @@ public sealed unsafe class EglContext : IDisposable
         return (display, true, fullInfo);
     }
 
-    private static nint CreateAngleDisplay()
+    private static nint CreateAngleDisplay(GpuAdapter? gpuAdapter)
     {
         // Avalonia 构建改了导出名（EGL_ 前缀），eglGetProcAddress 内部表里的名字不一定是哪种写法，两种都试。
         var proc = Egl.GetProcAddress("eglGetPlatformDisplayEXT");
@@ -238,14 +247,25 @@ public sealed unsafe class EglContext : IDisposable
         }
 
         var getPlatformDisplay = Marshal.GetDelegateForFunctionPointer<Egl.GetPlatformDisplayExtProc>(proc);
-        int[] attribs =
-        [
+
+        var attribs = new List<int>
+        {
             Egl.PlatformAngleTypeAngle, Egl.PlatformAngleTypeD3D11Angle,
             Egl.PlatformAngleDeviceTypeAngle, Egl.PlatformAngleDeviceTypeHardwareAngle,
-            Egl.None,
-        ];
+        };
 
-        return getPlatformDisplay(Egl.PlatformAngleAngle, Egl.DefaultDisplay, attribs);
+        if (gpuAdapter is not null)
+        {
+            // 指定适配器：ANGLE 拿这两个属性拼成 LUID 去 EnumAdapterLuid 匹配
+            attribs.Add(Egl.PlatformAngleDeviceIdHighAngle);
+            attribs.Add(gpuAdapter.LuidHigh);
+            attribs.Add(Egl.PlatformAngleDeviceIdLowAngle);
+            attribs.Add(unchecked((int)gpuAdapter.LuidLow));
+        }
+
+        attribs.Add(Egl.None);
+
+        return getPlatformDisplay(Egl.PlatformAngleAngle, Egl.DefaultDisplay, attribs.ToArray());
     }
 
     private static nint ChooseConfig(nint display, int surfaceBit)

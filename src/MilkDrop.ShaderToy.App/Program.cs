@@ -25,7 +25,9 @@ namespace MilkDrop.ShaderToy.App;
 /// <remarks>
 /// P0 打通了 GLFW → ANGLE(EGL/GLES3) → ImGui 这条链路；P3 起真正渲染 image pass：
 /// 转译 → 编译 → 画到 RGBA16F 离屏目标 → 拷到默认帧缓冲 → 叠 ImGui。
-/// 用法：<c>MilkDrop.ShaderToy.App [project.json] [--fixed-dt 0.0166] [--pause]</c>
+/// 用法：<c>MilkDrop.ShaderToy.App [作品ID|some.json] [--data DIR] [--fixed-dt 0.0166] [--pause]</c>
+/// 数据来源：作品数据（工程 JSON / pass 代码 / 通道绑定）全部从数据根的 <c>shadertoy.db</c> 读，
+/// 图片资源从数据根的 <c>media/</c> 读。
 /// </remarks>
 // 整个 App 本来就只跑 Windows x64（EGL/ANGLE + win32 句柄 + winmm 音频），
 // 标注出来是为了让 CA1416 在调用 WaveOutAudioSink 时不再报警。
@@ -41,19 +43,19 @@ internal static class Program
 
     private static string? _shaderPath;
     private static string? _texturePath;
-    private static string? _libraryPath;
+    private static string? _dataPath;
+    private static string? _gpuSelector;
+    private static GpuAdapter? _gpuAdapter;
+    private static bool _gpuListOnly;
     private static string? _openPath;
+    private static ShaderLibraryEntry? _openEntry;
     private static string? _shotPath;
-    private static string? _downloadTarget;
-    private static string? _importPath;
-    private static string? _fetchMissingTarget;
-    private static string? _proxyArgument;
     private static bool _listOnly;
-    private static bool _downloadAsCopy;
     private static int _shotFrames = 30;
     private static int _renderedFrames;
     private static string? _lastRenderError;
     private static bool _selfCheckReload;
+    private static bool _vsync = true;
     private static bool _reloadRequested;
     private static float _uiScaleOverride;
     private static float _uiScale = 1f;
@@ -97,38 +99,25 @@ internal static class Program
     private static double _fpsWindowStart;
     private static int _fpsFrames;
 
-    private static async Task<int> Main(string[] args)
+    private static int Main(string[] args)
     {
         // 日志里有中文，重定向到文件/管道时默认编码会mojibake
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
         ParseArgs(args);
 
-        // 下载/补齐资源都要过代理：命令行 > 环境变量 > 设置文件 > 内置默认（本机 socks5）
-        ShaderToyDownloader.SetDefaultProxy(ResolveProxy());
-
-        // 纯命令行模式：不建窗口（库列表/下载都能在 CI 或批处理里跑）
+        // 纯命令行模式：不建窗口（库列表/显卡列表能在 CI 或批处理里跑）
         if (_listOnly)
         {
             return PrintLibrary();
         }
 
-        if (_downloadTarget is not null)
+        if (_gpuListOnly)
         {
-            return await RunDownloadAsync().ConfigureAwait(false);
+            return PrintGpus();
         }
 
-        if (_importPath is not null)
-        {
-            return RunImport();
-        }
-
-        if (_fetchMissingTarget is not null)
-        {
-            return await RunFetchMissingAsync().ConfigureAwait(false);
-        }
-
-        ResolveShaderArgument();
+        ResolveGpuAdapter();
 
         // 必须在建窗口之前声明 DPI 感知：否则系统把整块画面按位图拉伸，字既小又糊
         TryEnableDpiAwareness();
@@ -181,10 +170,12 @@ internal static class Program
         }
 
         var stopwatch = Stopwatch.StartNew();
-        _context = EglContext.CreateForWindow(win32.Hwnd, vsync: false);
+
+        // 默认开垂直同步：跟显示器刷新率对齐，避免撕裂与满载空转（--no-vsync 可关掉，截图/跑分时用）
+        _context = EglContext.CreateForWindow(win32.Hwnd, _vsync, _gpuAdapter);
         stopwatch.Stop();
 
-        Console.WriteLine($"EGL 上下文建立耗时: {stopwatch.ElapsedMilliseconds} ms");
+        Console.WriteLine($"EGL 上下文建立耗时: {stopwatch.ElapsedMilliseconds} ms    VSync: {(_vsync ? "开（跟随显示器刷新率）" : "关")}");
         Console.WriteLine("EGL: " + _context.EglInfo);
 
         GpuCapabilities capabilities = _context.QueryCapabilities();
@@ -225,14 +216,8 @@ internal static class Program
 
         Vector2D<int> framebuffer = window.FramebufferSize;
 
-        // 图片资源：作品自带的在 JSON 旁边找；Shadertoy 下载的资源在 res/shadertoy 下找
-        var texturePaths = new List<string>();
-        if (_texturePath is not null)
-        {
-            texturePaths.Add(_texturePath);
-        }
-
-        texturePaths.Add(Path.Combine(Environment.CurrentDirectory, "res", "shadertoy"));
+        // 图片资源：作品自带的在 JSON 旁边找；站点资源在 <数据根>/media 树里找
+        var texturePaths = new List<string>(ResolveTextureSearchPaths());
 
         _player = new Player(
             Math.Max(1, framebuffer.X),
@@ -242,14 +227,18 @@ internal static class Program
             texturePaths,
             _soundEnabled ? CreateAudioSink : null);
 
+        // 截图也落在数据目录里，不散到进程工作目录
+        _player.ScreenshotDirectory = Path.Combine(ResolveDataRoot(), "screenshots");
         _player.Clock.FixedTimeStep = _fixedDt;
         _player.Clock.Paused = _startPaused;
 
-        _ui = new ShaderToyUi(_player, ResolveLibraryRoot(), _uiScale, win32.Hwnd);
-        _ui.OpenRequested += path => _openPath = path;
+        _ui = new ShaderToyUi(_player, ResolveDataRoot(), _uiScale, win32.Hwnd);
+        _ui.OpenEntryRequested += entry => _openEntry = entry;
+        _ui.OpenFileRequested += path => _openPath = path;
         _ui.ReloadRequested += RequestReload;
 
-        Console.WriteLine($"本地库: {_ui.LibraryRoot}");
+        Console.WriteLine($"数据目录: {ResolveDataRoot()}");
+        Console.WriteLine($"数据库: {_ui.DatabasePath}    作品 {_ui.EntryCount} 个");
         Console.WriteLine(
             $"DPI 缩放: {_uiScale:0.##}x（界面字体 {18f * _uiScale:0.#}px / 代码 {17f * _uiScale:0.#}px）"
             + $"    窗口 {window.Size.X}x{window.Size.Y}    绘制缓冲 {framebuffer.X}x{framebuffer.Y}");
@@ -261,7 +250,7 @@ internal static class Program
         }
         else
         {
-            OpenProject(_shaderPath);
+            LoadArgument(_shaderPath);
         }
 
         if (_selfCheckReload)
@@ -279,11 +268,11 @@ internal static class Program
     }
 
     /// <summary>
-    /// <c>--selfcheck-reload</c>：验证"重新加载"确实是从**磁盘**重新读入，而不是把内存里的东西再编译一遍。
+    /// <c>--selfcheck-reload</c>：验证"重新加载"确实是从**磁盘/数据库**重新读入，而不是把内存里的东西再编译一遍。
     /// </summary>
     /// <remarks>
     /// 做法：先把内存里的 image 代码改掉（不写盘），再调 <see cref="Player.Reload"/>；
-    /// 如果代码又变回文件里的内容，说明事实来源确实是磁盘。整个过程不动用户的文件。
+    /// 如果代码又变回来源里的内容，说明事实来源确实是磁盘或数据库。整个过程不写任何文件。
     /// </remarks>
     private static void RunReloadSelfCheck()
     {
@@ -308,26 +297,66 @@ internal static class Program
         bool restored = string.Equals(player.Project?.ImagePass?.Code, original, StringComparison.Ordinal);
 
         Console.WriteLine(
-            $"重载自检: Reload {(reloaded ? "成功" : "失败")}，代码已从文件恢复 = {restored}，"
+            $"重载自检: Reload {(reloaded ? "成功" : "失败")}，代码已从来源（库/文件）恢复 = {restored}，"
             + $"pass 数 {player.PassCount}，编译错误 {player.CompileErrors.Count}");
     }
 
-    /// <summary>加载一个作品并把关键信息打到控制台（启动和运行中切换共用）。</summary>
-    private static void OpenProject(string path)
+    /// <summary>
+    /// 命令行参数：磁盘上的 JSON 直接读文件，否则当成作品 ID 去数据库里找。
+    /// </summary>
+    private static void LoadArgument(string argument)
+    {
+        if (File.Exists(argument))
+        {
+            OpenFile(argument);
+            return;
+        }
+
+        ShaderLibrary library = ShaderLibrary.Scan(ResolveDataRoot());
+        ShaderLibraryEntry? entry = library.Find(argument);
+
+        if (entry is null)
+        {
+            Console.Error.WriteLine(
+                $"数据库里没有 \"{argument}\"（库: {library.DatabasePath}），改播内置演示。");
+
+            foreach (string warning in library.Warnings)
+            {
+                Console.Error.WriteLine("提示: " + warning);
+            }
+
+            _player!.LoadDemo();
+            return;
+        }
+
+        OpenEntry(entry);
+    }
+
+    /// <summary>从数据库加载一个作品（列表双击/命令行 ID 共用）。</summary>
+    private static void OpenEntry(ShaderLibraryEntry entry)
+    {
+        Player player = _player!;
+
+        if (player.LoadDatabase(entry.DatabasePath, entry.Id))
+        {
+            Console.WriteLine($"已加载: {player.Title}  ({entry.Id} ← {entry.DatabasePath})");
+        }
+        else
+        {
+            Console.Error.WriteLine("加载失败: " + player.Error);
+        }
+
+        LogLoad(player);
+    }
+
+    /// <summary>加载一个磁盘上的 JSON 文件（拖进窗口/命令行路径）。</summary>
+    private static void OpenFile(string path)
     {
         Player player = _player!;
 
         if (player.LoadFile(path))
         {
             Console.WriteLine($"已加载: {player.Title}  ({path})");
-
-            // 本地库里的作品（有 meta.json）记一次播放时间：只就地更新那一项，
-            // 不重扫列表 —— 顺序在扫描时就固定，双击播放不该把左栏顺序打乱
-            DateTimeOffset playedAt = DateTimeOffset.Now;
-            if (LocalLibrary.MarkPlayed(path, playedAt))
-            {
-                _ui?.MarkPlayed(path, playedAt);
-            }
         }
         else
         {
@@ -370,7 +399,7 @@ internal static class Program
         {
             Console.WriteLine($"已重新读入: {player.Title}  ({source})");
             LogLoad(player);
-            _ui?.Toast("已从文件重新读入");
+            _ui?.Toast("已重新读入");
         }
         else
         {
@@ -414,11 +443,17 @@ internal static class Program
         {
             _context.MakeCurrent();
 
-            // 界面里双击/拖拽进来的作品：下一帧开头再加载，避免在 ImGui 帧中途换掉 GL 资源
-            if (_openPath is { } path)
+            // 界面里双击（数据库里的作品）或拖入 JSON：下一帧开头再加载，避免在 ImGui 帧中途换掉 GL 资源
+            if (_openEntry is { } entry)
+            {
+                _openEntry = null;
+                OpenEntry(entry);
+                window.Title = $"MilkDrop.ShaderToy — {_player.Title}";
+            }
+            else if (_openPath is { } path)
             {
                 _openPath = null;
-                OpenProject(path);
+                OpenFile(path);
                 window.Title = $"MilkDrop.ShaderToy — {_player.Title}";
             }
 
@@ -731,51 +766,29 @@ internal static class Program
         }
     }
 
-    /// <summary>
-    /// <c>--shader &lt;id&gt;</c>：参数不是磁盘文件时按本地库里的 ID / 目录名解析成 project.json。
-    /// </summary>
-    private static void ResolveShaderArgument()
-    {
-        if (_shaderPath is null || File.Exists(_shaderPath))
-        {
-            return;
-        }
-
-        string root = ResolveLibraryRoot();
-        ShaderLibraryEntry? entry = ShaderLibrary.Scan(root).Find(_shaderPath);
-
-        if (entry is null)
-        {
-            Console.Error.WriteLine($"本地库里没有找到 \"{_shaderPath}\"（库: {root}），改播内置演示。");
-            _shaderPath = null;
-            return;
-        }
-
-        Console.WriteLine($"按 ID 解析: {_shaderPath} → {entry.ProjectPath}");
-        _shaderPath = entry.ProjectPath;
-    }
-
-    /// <summary><c>--list</c>：打印本地库（ID、标题、作者、占用、缺资源），不建窗口。</summary>
+    /// <summary><c>--list</c>：打印数据库里的作品（ID、标题、作者、pass 数、缺图），不建窗口。</summary>
     private static int PrintLibrary()
     {
-        string root = ResolveLibraryRoot();
-        ShaderLibrary library = ShaderLibrary.Scan(root);
+        string dataRoot = ResolveDataRoot();
+        ShaderLibrary library = ShaderLibrary.Scan(dataRoot);
 
-        Console.WriteLine($"本地库: {root}    共 {library.Entries.Count} 个作品");
+        Console.WriteLine($"数据目录: {dataRoot}");
+        Console.WriteLine($"数据库: {library.DatabasePath}    共 {library.Entries.Count} 个作品");
 
         foreach (ShaderLibraryEntry entry in library.Entries)
         {
-            long size = LocalLibrary.ComputeSize(entry);
-            string played = entry.LastPlayed is { } last
-                ? last.LocalDateTime.ToString("yyyy-MM-dd HH:mm")
-                : "从未播放";
-            string missing = entry.MissingResources > 0 ? $"    缺 {entry.MissingResources} 资源" : string.Empty;
-            string favorite = entry.Favorite ? "    ★" : string.Empty;
+            string captured = entry.CapturedAt == DateTime.MinValue
+                ? "时间未知"
+                : entry.CapturedAt.ToString("yyyy-MM-dd HH:mm");
+
+            // 细节（pass 数 / 缺图 / 标签）是按需查的：列表本身只读名字那几列
+            ShaderDatabaseDetails? details = library.TryReadDetails(entry);
+            string passes = details is null ? "?" : details.PassCount.ToString(CultureInfo.InvariantCulture);
+            string missing = details is { MissingMedia: > 0 } ? $"    缺 {details.MissingMedia} 个图" : string.Empty;
 
             Console.WriteLine(
                 $"{entry.Id,-10} {entry.Title}    [{entry.Author}]"
-                + $"    {LocalLibrary.DescribeSize(size)}    播放于 {played}{missing}{favorite}");
-            Console.WriteLine("    " + entry.ProjectPath);
+                + $"    {passes} pass    抓取于 {captured}{missing}");
         }
 
         foreach (string warning in library.Warnings)
@@ -786,140 +799,78 @@ internal static class Program
         return 0;
     }
 
-    /// <summary><c>--download &lt;id|url&gt;</c>：只下载不建窗口（UI 里的下载走同一套代码）。</summary>
-    private static async Task<int> RunDownloadAsync()
+    /// <summary>数据根目录：<c>--data</c> → 设置文件的 <c>dataDir</c> → exe 旁的 <c>stdata</c>。</summary>
+    private static string ResolveDataRoot() => DataPaths.ResolveRoot(_dataPath);
+
+    /// <summary><c>--gpu list</c>：打印本机所有 D3D 适配器（编号 / 名称 / 显存 / LUID），不建窗口。</summary>
+    private static int PrintGpus()
     {
-        string root = ResolveLibraryRoot();
-        Console.WriteLine($"本地库: {root}");
+        IReadOnlyList<GpuAdapter> adapters = GpuAdapters.Enumerate();
 
-        using HttpClient http = ShaderToyDownloader.CreateHttpClient();
-        var downloader = new ShaderToyDownloader(root, http);
+        Console.WriteLine("D3D 适配器（用 --gpu <编号|名字片段> 指定，如 --gpu 1 / --gpu nvidia）:");
+        Console.WriteLine(GpuAdapters.Describe(adapters));
+        Console.WriteLine("不给 --gpu 时用系统默认卡，可在 Windows 设置 → 系统 → 显示 → 图形 里给本 exe 选“高性能/省电”。");
 
-        DownloadResult result = await downloader
-            .DownloadAsync(
-                _downloadTarget!,
-                new DownloadOptions { Overwrite = !_downloadAsCopy },
-                new ConsoleProgress())
-            .ConfigureAwait(false);
-
-        Console.WriteLine(result.Describe());
-
-        foreach (string asset in result.Assets)
-        {
-            Console.WriteLine("  资源: " + asset);
-        }
-
-        foreach (MissingResource missing in result.Missing)
-        {
-            Console.WriteLine($"  缺: {missing.Url}（{missing.Error}）");
-        }
-
-        foreach (string warning in result.Warnings)
-        {
-            Console.WriteLine("  提示: " + warning);
-        }
-
-        return result.Success ? 0 : 1;
-    }
-
-    /// <summary>命令行进度（直接打印，不经线程池，保证顺序）。</summary>
-    private sealed class ConsoleProgress : IProgress<string>
-    {
-        public void Report(string value) => Console.WriteLine("  " + value);
-    }
-
-    /// <summary>代理优先级：命令行 &gt; 环境变量 &gt; 设置文件。</summary>
-    private static string ResolveProxy()
-    {
-        if (_proxyArgument is not null)
-        {
-            return _proxyArgument;
-        }
-
-        string? environment = Environment.GetEnvironmentVariable("MILKDROP_PROXY");
-        return string.IsNullOrWhiteSpace(environment) ? HttpSettings.LoadProxy() : environment.Trim();
+        return 0;
     }
 
     /// <summary>
-    /// <c>--fetch-missing &lt;id|目录&gt;</c>：把作品里还指向站点的资源抓下来存进 <c>textures/</c>。
+    /// 解析要用哪块显卡：<c>--gpu</c>（命令行）优先，其次设置文件 <c>shadertoy.json</c> 的 <c>gpu</c>。
     /// </summary>
-    private static async Task<int> RunFetchMissingAsync()
+    /// <remarks>
+    /// 没指定（或指定失败）时保持 <see cref="_gpuAdapter"/> 为 null —— 交给 ANGLE/D3D11 的默认适配器，
+    /// 也就是系统"图形设置"里的偏好。多卡机器上顺手把候选列表打出来，省得用户去猜。
+    /// </remarks>
+    private static void ResolveGpuAdapter()
     {
-        string root = ResolveLibraryRoot();
-        string target = _fetchMissingTarget!;
+        string? selector = _gpuSelector ?? AppSettings.LoadGpu();
 
-        // 先按库里的 ID/目录名解析；解析不到就把参数当路径用
-        ShaderLibraryEntry? entry = ShaderLibrary.Scan(root).Find(target);
-        string directory = entry?.Directory ?? target;
-
-        Console.WriteLine($"本地库: {root}");
-        Console.WriteLine($"代理: {ShaderToyDownloader.DefaultProxyUrl ?? "直连"}");
-        Console.WriteLine($"目标: {directory}");
-
-        var fetcher = new MissingResourceFetcher();
-        FetchResult result = await fetcher
-            .FetchAsync(directory, new DownloadOptions(), new ConsoleProgress())
-            .ConfigureAwait(false);
-
-        Console.WriteLine(result.Describe());
-
-        foreach (MissingResource missing in result.StillMissing)
+        if (string.IsNullOrWhiteSpace(selector))
         {
-            Console.WriteLine($"  仍缺: {missing.Url}（{missing.Error}）");
-        }
+            IReadOnlyList<GpuAdapter> available = GpuAdapters.Enumerate();
 
-        // 有资源没补上也返回非 0，方便批处理判断
-        return result.Success && result.Failed == 0 ? 0 : 1;
-    }
-
-    /// <summary>
-    /// <c>--import &lt;file.json&gt;</c>：把本地 json 拷进库（文件名即 ID），不建窗口。
-    /// </summary>
-    private static int RunImport()
-    {
-        string root = ResolveLibraryRoot();
-        Console.WriteLine($"本地库: {root}");
-
-        var importer = new LocalJsonImporter(root);
-        ImportResult result = importer.Import(_importPath!, overwrite: !_downloadAsCopy);
-
-        Console.WriteLine(result.Describe());
-
-        foreach (string asset in result.Assets)
-        {
-            Console.WriteLine("  资源: " + asset);
-        }
-
-        foreach (string warning in result.Warnings)
-        {
-            Console.WriteLine("  提示: " + warning);
-        }
-
-        return result.Success ? 0 : 1;
-    }
-
-    /// <summary>本地库根目录：先看 <c>--library</c>，再找 exe 旁的 <c>shaders/</c>，最后退回仓库里的示例目录。</summary>
-    private static string ResolveLibraryRoot()
-    {
-        if (_libraryPath is not null)
-        {
-            return Path.GetFullPath(_libraryPath);
-        }
-
-        foreach (string candidate in (string[])
-                 [
-                     Path.Combine(AppContext.BaseDirectory, "shaders"),
-                     Path.Combine(Environment.CurrentDirectory, "shaders"),
-                     Path.Combine(Environment.CurrentDirectory, "res", "shadertoy", "stpreset"),
-                 ])
-        {
-            if (Directory.Exists(candidate))
+            if (available.Count > 1)
             {
-                return Path.GetFullPath(candidate);
+                Console.WriteLine("检测到多块显卡（默认用系统首选，可用 --gpu 指定）:");
+                Console.WriteLine(GpuAdapters.Describe(available));
             }
+
+            return;
         }
 
-        return Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "shaders"));
+        IReadOnlyList<GpuAdapter> adapters = GpuAdapters.Enumerate();
+        GpuAdapter? adapter = GpuAdapters.Match(adapters, selector, out string? error);
+
+        if (adapter is null)
+        {
+            Console.Error.WriteLine($"GPU 选择失败（{selector}）：{error}");
+            Console.Error.WriteLine("可用适配器:");
+            Console.Error.WriteLine(GpuAdapters.Describe(adapters));
+            Console.Error.WriteLine("改为系统默认显卡。");
+            return;
+        }
+
+        _gpuAdapter = adapter;
+        Console.WriteLine($"GPU: 指定 {adapter}");
+    }
+
+    /// <summary>
+    /// 图片搜索目录：作品目录由 <see cref="Player"/> 自己加在最前，这里给数据目录那一层。
+    /// </summary>
+    private static IReadOnlyList<string> ResolveTextureSearchPaths()
+    {
+        var paths = new List<string>();
+
+        if (_texturePath is not null)
+        {
+            paths.Add(Path.GetFullPath(_texturePath));
+        }
+
+        paths.AddRange(DataPaths.TextureSearchPaths(ResolveDataRoot()));
+
+        // 仓库里的示例资源（开发期用）
+        paths.Add(Path.Combine(Environment.CurrentDirectory, "res", "shadertoy"));
+        return paths;
     }
 
     /// <summary>
@@ -1035,10 +986,14 @@ internal static class Program
 
                     break;
 
-                case "--library":
+                case "--data":
                     if (i + 1 < args.Length)
                     {
-                        _libraryPath = args[++i];
+                        _dataPath = args[++i];
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine("--data 需要一个数据目录路径。");
                     }
 
                     break;
@@ -1047,54 +1002,31 @@ internal static class Program
                     _listOnly = true;
                     break;
 
-                case "--download":
+                case "--vsync":
+                    _vsync = true;
+                    break;
+
+                case "--no-vsync":
+                    _vsync = false;
+                    break;
+
+                case "--gpu":
                     if (i + 1 < args.Length)
                     {
-                        _downloadTarget = args[++i];
+                        string value = args[++i];
+
+                        if (string.Equals(value, "list", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _gpuListOnly = true;
+                        }
+                        else
+                        {
+                            _gpuSelector = value;
+                        }
                     }
                     else
                     {
-                        Console.Error.WriteLine("--download 需要一个作品 ID 或链接。");
-                    }
-
-                    break;
-
-                case "--as-copy":
-                    _downloadAsCopy = true;
-                    break;
-
-                case "--import":
-                    if (i + 1 < args.Length)
-                    {
-                        _importPath = args[++i];
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine("--import 需要一个本地 json 路径。");
-                    }
-
-                    break;
-
-                case "--fetch-missing":
-                    if (i + 1 < args.Length)
-                    {
-                        _fetchMissingTarget = args[++i];
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine("--fetch-missing 需要作品 ID 或作品目录。");
-                    }
-
-                    break;
-
-                case "--proxy":
-                    if (i + 1 < args.Length)
-                    {
-                        _proxyArgument = args[++i];
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine("--proxy 需要一个代理地址（如 socks5://127.0.0.1:1080，none 表示直连）。");
+                        Console.Error.WriteLine("--gpu 需要一个适配器编号/名字片段（如 1、nvidia），或 list 列出所有显卡。");
                     }
 
                     break;
@@ -1133,20 +1065,20 @@ internal static class Program
 
                 case "--help":
                 case "-h":
-                    Console.WriteLine("用法: MilkDrop.ShaderToy.App [project.json|作品ID] [--library DIR] [--fixed-dt 0.0166] [--pause] [--no-sound] [--textures DIR]");
-                    Console.WriteLine("  project.json  Shadertoy 导出 JSON，或本地库里的作品 ID（如 flGyWc）；省略则播放内置演示");
-                    Console.WriteLine("  --library     本地库根目录（默认 exe 旁的 shaders/，其次 res/shadertoy/stpreset）");
-                    Console.WriteLine("  --list        打印本地库内容后退出（不建窗口）");
-                    Console.WriteLine("  --download X  下载作品 X（ID 或链接）到本地库后退出；--as-copy 让同名作品另存为 <id>-2");
-                    Console.WriteLine("  --import FILE 把本地 json 导入本地库后退出（文件名即作品 ID；旁边的图片一起带上）");
-                    Console.WriteLine("  --fetch-missing X  把作品 X（ID 或目录）里还指向 shadertoy 的资源抓到 textures/");
-                    Console.WriteLine("  --proxy URL   下载/补齐资源用的代理，默认 socks5://127.0.0.1:1080；none 表示直连");
-                    Console.WriteLine("                （也可用环境变量 MILKDROP_PROXY，或界面左侧\"代理\"一栏持久化）");
+                    Console.WriteLine("用法: MilkDrop.ShaderToy.App [作品ID|some.json] [--data DIR] [--fixed-dt 0.0166] [--pause] [--no-sound] [--textures DIR]");
+                    Console.WriteLine("  作品ID        shadertoy.db 里的作品（如 flGyWc）；磁盘上的 json 路径则直接读文件；省略则播放内置演示");
+                    Console.WriteLine("  --data DIR    数据目录（默认设置文件里的 dataDir，其次 exe 旁的 stdata/）");
+                    Console.WriteLine("                作品数据来自其中的 shadertoy.db，图片来自其中的 media/");
+                    Console.WriteLine("  --list        打印数据库里的作品后退出（不建窗口）");
+                    Console.WriteLine("  --gpu X       用哪块显卡：编号（0/1，见 --gpu list）、名字片段（nvidia/radeon/intel）");
+                    Console.WriteLine("                或 luid:1a2b3c4d；不给则用系统默认（跟随 Windows 图形设置里的高性能/省电）");
+                    Console.WriteLine("  --gpu list    列出本机所有 D3D 适配器后退出（不建窗口）");
+                    Console.WriteLine("  --no-vsync    关掉垂直同步（默认开，跟随显示器刷新率；截图/跑分时用这个）");
                     Console.WriteLine("  --fixed-dt    固定时间步长（截图/回归用，同帧号 = 同状态）");
                     Console.WriteLine("  --pause       启动即暂停");
                     Console.WriteLine("  --no-sound    不出声（sound pass 仍编译，music 通道不更新）");
                     Console.WriteLine("  --audio-log   每 2 秒打印音频水位（已渲染/已播/缓冲/欠载）");
-                    Console.WriteLine("  --textures    额外的图片搜索目录（作品自带的图片优先在 JSON 旁边找）");
+                    Console.WriteLine("  --textures    额外的图片搜索目录（默认先找数据根的 media/）");
                     Console.WriteLine("  --ui-scale F  界面缩放倍数（默认按窗口 DPI 推断，1 = 96 DPI）");
                     Console.WriteLine("  --shot PATH   N 帧后把整窗（含界面）存成 PNG 并退出");
                     Console.WriteLine("  --shot-frames N  配合 --shot，默认 30");

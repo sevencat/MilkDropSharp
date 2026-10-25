@@ -229,7 +229,7 @@ MilkDrop.ShaderToy.sln
 
 **后续调整（P8 之后）：界面改为只读。** 去掉 pass 代码编辑器（`PassEditor.cs` 已删除）、通道下拉/采样器/
 vflip/路径编辑、"应用并重编译"、三个标签页；只保留展示（通道折叠面板、pass 列表、错误面板）+
-主控栏一个 **「重新加载」** 按钮（从 `project.json` 重新读入，失败时保留当前画面）。
+主控栏一个 **「重新加载」** 按钮（从数据库/文件重新读入，失败时保留当前画面）。
 因此本节"界面里改代码 → 生效"这条验收作废，改由 `--selfcheck-reload` 覆盖
 （内存改代码 → 重新加载 → 代码必须恢复成文件内容）。实测见 `shaderToyIssue.md` S7-13。
 
@@ -244,7 +244,7 @@ vflip/路径编辑、"应用并重编译"、三个标签页；只保留展示（
 - 播放控制：暂停/重置/时间轴、FPS、分辨率、截图、全屏（复用 `Hotkeys` 的 F11）、**重新加载**
 - 错误面板：编译失败时把 GLSL 日志 + 行号显示出来（这是日常最常用的功能）
 - **验收**：从左侧列表双击一个本地作品直接播放；拖入一个 shadertoy JSON 直接播放；
-  外部改 `project.json` 后点"重新加载"，改动生效（原"界面里改代码"的验收已随编辑功能一起取消）。
+  外部改库（或拖入的 json 文件）后点"重新加载"，改动生效（原"界面里改代码"的验收已随编辑功能一起取消）。
 
 ### P8 本地库、下载与导入导出（中）· **已落地**（实测记录见 `shaderToyIssue.md` S-P8）
 
@@ -262,21 +262,35 @@ vflip/路径编辑、"应用并重编译"、三个标签页；只保留展示（
   离线加载会全部落空 —— `ResolveTexturePath` 现在先按"作品目录 + 相对路径"找（`shaderToyIssue.md` S8-7）。
 - 补了**本地 JSON 导入**（文件名即 ID），见本节末尾。
 
-**目录布局（每个作品一个独立子目录，按 ID 命名）**
+**目录布局（数据根 → 数据库 + 图片）**  ← **再调整：作品数据改为从 `shadertoy.db` 取，不再扫 `shaders/`**
+
+数据根（`dataDir`）解析顺序：`--data` → **exe 旁的 `shadertoy.json`** 的 `dataDir`
+→ **exe 旁的 `stdata/`**。相对路径按 exe 目录解析。内部结构与 `F:\code\ShaderToySnap\output`
+（ShaderToySnap 的抓取结果）等价，两边指同一个目录即可：
 
 ```
-shaders/                          ← 本地库根（默认 exe 旁，可用 --library 指定）
-  flGyWc/
-    project.json                  ← Shadertoy 官方导出格式，**原样保真**
-    meta.json                     ← 本地元信息：来源 URL、下载时间、标题、作者、标签、收藏、最后播放时间
-    thumbnail.png                 ← 预览图（有就存）
-    textures/
-      noise.jpg                   ← 该作品用到的 input 资源（图片 / cubemap 6 面 / volume）
+<数据根>/                          ← 例如 F:\code\ShaderToySnap\output，或 exe 旁的 stdata
+  shadertoy.db                    ← 作品数据**唯一来源**：shaders / renderpasses / shader_inputs / shader_outputs
+  media/                          ← 站点 /media/... 资源按原路径存放（图片只从这里拿）
+    media/a/<hash>.png            ← 即 JSON 里的 /media/a/<hash>.png
+  screenshots/                    ← F12／界面截图
+  shaders/<id>/                   ← 早期"文件布局"：下载/导入工具仍会写，**播放侧不再读**
 ```
 
-- 目录名只用 **ID**（6~7 位字母数字），标题里的 `:` `?` `*` 等一律不进路径 —— 规避 Windows 非法字符与 260 字符限制。
-- `project.json` 保存**原始文本**（不经过我们模型的反序列化再序列化），避免 `\n` 转义被改写、字段顺序/未知字段丢失。
-- `meta.json` 由我们维护，`project.json` 视为"上游格式"不塞私有字段 —— 这样导出的文件还能直接导回 shadertoy。
+- **播放侧只认 db + `media/`**：`ShaderLibrary.Scan(数据根)` 读 `shaders` 表出列表 —— **只查
+  `ShaderId` / `Name` / `UserName` / `CapturedAt` 四列**（够显示、够排序，不数 pass、不数缺图、不读代码），
+  详细数据等"双击播放"时才由 `ShaderDatabase.TryReadDetails(id)` / `TryLoadProject(id)` 去取。
+- 工程优先取 `shaders.RawJson`（原样上游文本）；**pass 代码以 `renderpasses.Code` 为准**，
+  但要求同 `PassIndex` 且 pass 类型一致才覆盖 —— 表被手工改乱时宁可用 JSON，不能张冠李戴。
+  `RawJson` 缺失/坏掉时按 `renderpasses` + inputs/outputs 三张表重建（工程里带一条提示）。
+- 图片路径原样保留站点形式（`/media/a/x.png`）→ 对应 `<数据根>/media/media/a/x.png`；管线按
+  "搜索目录 + 相对路径 / 文件名 / `textures/` 下文件名"三级兜底，手工摆的图也能用。
+- 缺图统计只算 texture/cubemap/volume 里 `LocalFilePath` 为空的；keyboard/music 的 `FilePath`
+  是站点预设图，不算缺。
+- SQLite 走系统自带 `winsqlite3.dll`（P/Invoke，不引 NuGet、AOT 友好），**只读**打开，不写别人的库结构。
+- 写侧（下载/导入/补齐资源）代码保留但不再接界面/命令行：抓取交给 ShaderToySnap。
+  `ShaderToyDownloader` / `LocalJsonImporter` / `MissingResourceFetcher` / `ShaderMeta` 仍由测试驱动，
+  写的是上表的 `shaders/<id>/` 文件布局（`raw.json` + `meta.json` + `textures/`）。
 
 **下载流程（输入 ID 或 URL，如 `flGyWc` / `https://www.shadertoy.com/view/flGyWc`）**
 
@@ -284,42 +298,67 @@ shaders/                          ← 本地库根（默认 exe 旁，可用 --l
 2. 从页面内嵌的 `gShaderToy` JSON 取出完整工程。
 3. 扫描所有 `inputs[]`：`texture`（`src`）、`cubemap`（6 个 `src`/`filepath`）、`volume`（`id`）、`music/musicstream`（忽略），逐个下载到 `textures/`。
 4. **改写 JSON 里的资源路径为相对路径**（`textures/noise.jpg`）—— 否则下次离线加载还是指向 `https://...`。
-5. 抓 `thumbnail` 存 `thumbnail.png`；写 `project.json`（原样）+ `meta.json`。
+5. 抓 `thumbnail` 存 `thumbnail.png`；写 `raw.json`（原样）+ `meta.json`。
 6. 单个资源 404/超时 → 记日志、用占位图/黑纹理，**不让整次下载失败**；UI 里标出"缺资源"。
 
-**本地库的行为**
+**本地库的行为（数据库版）**
 
-- 启动扫 `shaders/*/project.json` 建索引（只读 `meta.json` + 文件大小，不快照读全部代码），列表按最近播放排序。
-- 同名 ID 再次下载：默认覆盖 `project.json`/`meta.json`，资源按需增量（已存在且非空则跳过）；UI 提供"另存为 `<id>-2`"。
-- 删除：列表右键菜单删整目录（弹确认框；平铺布局不提供）；占用空间在悬停提示里显示。
-- 命令行：`--shader <id|路径>` 直接播；`--library DIR` 指定库根；`--list` 打印库内容。
-- 手工放进去的作品（拷一个 `project.json` + `textures/`）也要能被扫到 —— 不依赖 `meta.json`，缺失就现场生成默认值。
+- 启动读 `<数据根>/shadertoy.db` 的 `shaders` 表建列表，按 `CapturedAt` 倒序（列表顺序扫描时固定，播放不重排）；
+  库不存在/损坏只给一条提示，不抛异常、不崩。
+- **列表只带"名字"级信息**（标题 / 作者 / ID）：pass 数、缺图数、标签这些要查别的表，统一推迟到打开作品时
+  （`--list` 这种显式命令会自己按需再查一次，属于例外）。左栏项内不显示"缺 N 图"标记、hover 也只给标题/ID/作者，
+  铺开详情在右侧主控面板（打开后显示来源/ID/作者/pass 数）。
+- 左栏底部只留一行"数据库: …\shadertoy.db"（鼠标悬停显示完整路径），不再放操作提示行。
+- 没有收藏/删除/占用统计：这些信息 db 里没有，也不去写别人的库；需要管理请用 ShaderToySnap。
+- 命令行：`作品ID` 直接播（找不到就提示 + 播演示）、磁盘上的 json 路径则直接读文件；
+  `--data DIR` 指定数据根；`--list` 打印库内容。拖入 json 仍可直接播放（不入库）。
 
 **导入本地 JSON（文件名即 ID）**
 
-- 入口：左侧库的 **「导入 JSON…」**（comdlg32 的 `GetOpenFileNameW`，不引 WinForms/nativefiledialog）+ 命令行 `--import FILE`。
+- 入口：原为左侧库的 **「导入 JSON…」**（comdlg32 的 `GetOpenFileNameW`）+ 命令行 `--import FILE`；
+  **数据源改为数据库后这两个入口已下线**（抓取/入库由 ShaderToySnap 负责），`LocalJsonImporter` 仅保留给测试与工具调用。
   `--as-copy` 对导入同样生效（同名另存为 `<id>-2`）。
 - ID = **文件名（不含扩展名）**，目录 = `<id 小写>`；文件名里的非法字符在目录名上换成 `_`，
-  `meta.json` 里保留原名（`project.json` 的 `info.id` 不参与命名）。
+  `meta.json` 里保留原名（`raw.json` 的 `info.id` 不参与命名）。
 - 资源：JSON 里引用的**本地文件**（绝对路径，或相对 JSON 所在目录的路径，或同目录同名文件）一起拷进 `textures/`，
   并把 JSON 里的路径改写成相对路径；cubemap 自动带上同目录的 `_1.._5` 六面。
 - 站点路径（`/media/...`、`http(s)://`）离线拿不到 → 记进 `missingResources`，作品照样导入（缺的通道用黑纹理）。
-- 源文件已在库根下的（比如重复导入 `shaders/x/project.json`）直接拒绝，避免自我覆盖。
+- 源文件已在库根下的（比如重复导入 `shaders/x/raw.json`）直接拒绝，避免自我覆盖。
 - **手工补资源**：站点要登录才能拿图（curl/.NET 均被 Cloudflare 403），所以支持"自己下载好丢进去"：
   放到 `<库>/<id>/textures/<文件名>`（平铺布局就是 `<库>/textures/`）；`ResolveTexturePath` 会按文件名兜底，
   JSON 里仍是 `/media/a/xxx.png` 也能用。想同时把 JSON 改成相对路径并清掉"缺资源"标记 →
   右键"补齐缺失资源"（文件已在就不联网）或 `--fetch-missing <id|目录>`。
 - **代理**：下载/补齐都走可配置代理，默认 `socks5://127.0.0.1:1080`；
-  `--proxy URL` / `MILKDROP_PROXY` / `%APPDATA%\MilkDropShaderToy\settings.json` / 界面"代理"一栏。
+  `--proxy URL` / `MILKDROP_PROXY` / exe 旁的 `shadertoy.json` 的 `proxy`。
 
-- **验收**：
-  - 输入 `flGyWc` → 下载完成 → 断网重启程序 → 仍能从本地库加载并正常播放（含它用到的纹理）；
-  - 目录里只有 `project.json` 也能被识别；
-  - 下载一个带 cubemap 的作品，6 面资源齐全；
-  - 故意让某个纹理 URL 404，作品仍能加载、UI 提示缺资源；
-  - 重复下载同 ID 不产生重复目录；
-  - 导入一个 `lunchbreak.json` + 旁边的 `img/hash.png` → 库目录为 `lunchbreak/`，图片落到 `textures/`，
-    路径已改写，能直接播放（含中文文件名）。
+- **验收（数据库版）**：
+  - `--data F:\code\ShaderToySnap\output`（或写进 settings 的 `dataDir`）→ `--list` 列出 db 里的作品，
+    双击列表或 `--shader <id>` 能出帧；
+  - 带贴图的作品（`flGyWc` / `73KXRh`）纹理从 `media/media/a/` 取到，控制台没有"找不到图片"；
+  - 在库里改 `renderpasses.Code` → 点"重新加载"→ 画面按新代码变化；
+  - 把 `shaders.RawJson` 清空 → 仍能按表重建并播放（界面/控制台提示"按表重建"）；
+  - 多 pass 作品（`73ySRh` 的 image + common + buffer）pass 数与代码各自对得上；
+  - 数据库不存在/损坏 → 列表为空 + 一条提示，程序照常启动。
+
+### 多显卡机器：选哪块卡（已落地）
+
+ANGLE 走 D3D11，默认用**系统默认适配器**（不指定就跟随 Windows"设置 → 系统 → 显示 → 图形"里给本 exe
+配的高性能/省电偏好）。要精确指定：
+
+- `--gpu list`：列出 DXGI 枚举到的所有适配器（编号 / 名称 / 厂商:设备 / 显存 / 是否软件）。
+- `--gpu <编号|名字片段|luid:xxxxxxxx>`：按索引（`1`）、名称片段（`nvidia` / `radeon` / `intel`，命中多块时
+  取非软件、显存最大的）、或 LUID 选卡；也可写进 `shadertoy.json` 的 `gpu` 字段（命令行优先）。
+- 实现：`GpuAdapters`（`dxgi.dll` 的 `IDXGIFactory1::EnumAdapters1` + `IDXGIAdapter1::GetDesc1`，手写 vtable，
+  不引 NuGet、不开内建 COM）→ 拿 LUID → 传给 `EglContext.CreateForWindow` →
+  以 `EGL_PLATFORM_ANGLE_DEVICE_ID_HIGH/LOW_ANGLE`（`0x34D6/0x34D7`）建 platform display。
+- 选错/不存在时打印候选列表并回落系统默认，不影响启动。
+
+### 垂直同步（默认开）
+
+- 默认 `eglSwapInterval(display, 1)`：跟显示器刷新率对齐，不撕裂、也不空转烧 GPU；
+  启动日志会打 `VSync: 开（跟随显示器刷新率）`。
+- `--no-vsync` 关掉（截图/跑分/测上限时用），日志打 `VSync: 关`。
+- 只影响交换节奏，不影响 `--fixed-dt` 的确定性（同帧号仍是同状态，回归对比不受影响）。
 
 ### P9 验证与 AOT（中）
 

@@ -48,6 +48,12 @@ internal sealed class Player : IDisposable
     private int _width;
     private int _height;
 
+    /// <summary>来源是数据库时的 <c>shadertoy.db</c> 路径（文件来源为 null）。</summary>
+    private string? _databasePath;
+
+    /// <summary>来源是数据库时的作品 ID。</summary>
+    private string? _shaderId;
+
     /// <param name="audioSinkFactory">音频后端工厂；返回 null 表示不出声（<c>--no-sound</c> 或没有设备）。</param>
     public Player(
         int width,
@@ -89,8 +95,13 @@ internal sealed class Player : IDisposable
     /// <summary>内置演示用的作品来源标识。</summary>
     public const string BuiltinSource = "builtin";
 
-    /// <summary>当前作品来源（文件路径或 <see cref="BuiltinSource"/>）。</summary>
+    /// <summary>当前作品来源（数据库里的作品 ID、拖入的 JSON 路径，或 <see cref="BuiltinSource"/>）。</summary>
     public string SourceName { get; private set; } = BuiltinSource;
+
+    /// <summary>界面上"来源"一行显示的文字（数据库来源会带上 db 路径）。</summary>
+    public string SourceDescription => _shaderId is { Length: > 0 } id && _databasePath is { Length: > 0 } database
+        ? $"{id}  ←  {database}"
+        : SourceName;
 
     /// <summary>最近一次加载/编译的错误（成功时 null）。</summary>
     public string? Error { get; private set; }
@@ -133,7 +144,7 @@ internal sealed class Player : IDisposable
     public IReadOnlyList<PassCompileError> CompileErrors =>
         _pipeline?.CompileErrors ?? (IReadOnlyList<PassCompileError>)[];
 
-    /// <summary>加载一个 Shadertoy 导出 JSON；失败时回落到演示作品。</summary>
+    /// <summary>加载一个 Shadertoy 导出 JSON 文件（拖进窗口的那种）；失败时回落到演示作品。</summary>
     public bool LoadFile(string path)
     {
         try
@@ -142,6 +153,8 @@ internal sealed class Player : IDisposable
 
             if (Compile(project, path))
             {
+                _databasePath = null;
+                _shaderId = null;
                 return true;
             }
 
@@ -159,11 +172,61 @@ internal sealed class Player : IDisposable
     }
 
     /// <summary>
-    /// 从磁盘重新读入当前作品（界面上的"重新加载"）。
+    /// 从 <c>shadertoy.db</c> 加载一个作品（正常路径）；失败时回落到演示作品。
     /// </summary>
     /// <remarks>
-    /// 与 <see cref="LoadFile"/> 的区别：失败时**保留当前画面**，只把原因写进 <see cref="Error"/>，
-    /// 不回落到演示作品 —— 重新读入不该因为文件正被外部编辑器写坏而丢掉正在看的东西。
+    /// 工程优先取库里的 <c>RawJson</c>，pass 代码以 <c>renderpasses.Code</c> 为准，
+    /// 图片按 JSON 里的站点路径在数据根的 <c>media/</c> 下找（见 <see cref="ShaderDatabase"/>）。
+    /// </remarks>
+    public bool LoadDatabase(string databasePath, string shaderId)
+    {
+        try
+        {
+            using var database = new ShaderDatabase(databasePath);
+
+            if (!database.IsOpen)
+            {
+                Error = database.Error ?? "打不开数据库：" + databasePath;
+                LoadDemo();
+                return false;
+            }
+
+            ShaderToyProject? project = database.TryLoadProject(shaderId, out string? error);
+
+            if (project is null)
+            {
+                Error = error ?? $"数据库里没有作品 {shaderId}。";
+                LoadDemo();
+                return false;
+            }
+
+            if (Compile(project, shaderId))
+            {
+                _databasePath = databasePath;
+                _shaderId = shaderId;
+                return true;
+            }
+
+            LoadDemo();
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                       or System.Text.Json.JsonException or ShaderToyImportException
+                                       or ShaderException or InvalidOperationException or ArgumentException)
+        {
+            Error = $"读取 {shaderId} 失败：{ex.Message}";
+            LoadDemo();
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 重新读入当前作品（界面上的"重新加载"）：数据库来源就重读库，拖入的 JSON 就重读文件。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="LoadFile"/>／<see cref="LoadDatabase"/> 的区别：失败时**保留当前画面**，
+    /// 只把原因写进 <see cref="Error"/>，不回落到演示作品 —— 重新读入不该因为库/文件正被外部写坏
+    /// 而丢掉正在看的东西。
     /// </remarks>
     /// <returns>是否重新读入并重建了管线。</returns>
     public bool Reload()
@@ -175,16 +238,37 @@ internal sealed class Player : IDisposable
 
         try
         {
-            ShaderToyProject project = ShaderToyJsonImporter.LoadFile(SourceName);
+            if (_shaderId is { Length: > 0 } shaderId && _databasePath is { Length: > 0 } databasePath)
+            {
+                using var database = new ShaderDatabase(databasePath);
+
+                if (!database.IsOpen)
+                {
+                    Error = database.Error ?? "打不开数据库：" + databasePath;
+                    return false;
+                }
+
+                ShaderToyProject? project = database.TryLoadProject(shaderId, out string? error);
+
+                if (project is null)
+                {
+                    Error = error ?? $"数据库里没有作品 {shaderId}。";
+                    return false;
+                }
+
+                return Compile(project, shaderId);
+            }
+
+            ShaderToyProject loaded = ShaderToyJsonImporter.LoadFile(SourceName);
 
             // Compile 在构造新管线成功后才换掉旧的：编译失败时画面仍是上一次的内容
-            return Compile(project, SourceName);
+            return Compile(loaded, SourceName);
         }
-        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException
-                                       or ShaderToyImportException or ShaderException
-                                       or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                       or System.Text.Json.JsonException or ShaderToyImportException
+                                       or ShaderException or InvalidOperationException or ArgumentException)
         {
-            Error = $"{Path.GetFileName(SourceName)}: {ex.Message}";
+            Error = $"{SourceName}: {ex.Message}";
             return false;
         }
     }
@@ -234,6 +318,9 @@ internal sealed class Player : IDisposable
         _audio?.SeekToSample((long)Math.Round(seconds * (float)AudioBuffer.SampleRate));
     }
 
+    /// <summary>截图默认落盘目录（由 <see cref="Program"/> 指到数据目录下的 <c>screenshots/</c>）。</summary>
+    public string ScreenshotDirectory { get; set; } = "screenshots";
+
     /// <summary>把当前帧缓冲存成 PNG（<b>必须在画完 shader、画 UI 之前调用</b>，否则截图里会有界面）。</summary>
     /// <returns>实际写入的绝对路径；没有可截的画面时返回 null。</returns>
     public string? Screenshot(string? path = null)
@@ -243,7 +330,7 @@ internal sealed class Player : IDisposable
             return null;
         }
 
-        path ??= Path.Combine("screenshots", $"shot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
+        path ??= Path.Combine(ScreenshotDirectory, $"shot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
 
         // 不再重渲一遍：默认帧缓冲里就是刚才 Render + CopyTexture 的结果，
         // 重渲会推进 buffer 的 ping-pong，截出来的不是屏幕上那一帧。
@@ -253,6 +340,9 @@ internal sealed class Player : IDisposable
     /// <summary>加载内置演示作品（顺便也把它当成可编辑的工程）。</summary>
     public void LoadDemo()
     {
+        _databasePath = null;
+        _shaderId = null;
+
         var project = new ShaderToyProject
         {
             Version = "0.1",
